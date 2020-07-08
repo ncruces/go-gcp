@@ -1,3 +1,5 @@
+// Package glog implements basic logging for Google Cloud Run
+// and Cloud Functions.
 package glog
 
 import (

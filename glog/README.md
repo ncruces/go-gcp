@@ -1,3 +1,3 @@
-# [Cloud Logging](https://cloud.google.com/logging/) for Go Google Cloud Run and Cloud Functions
+# [Cloud Logging](https://cloud.google.com/logging/) in Go for Cloud Run and Cloud Functions
 
-[![GoDoc](https://godoc.org/github.com/ncruces/go-gcp/logging?status.svg)](https://godoc.org/github.com/ncruces/go-gcp/logging)
+[![GoDoc](https://img.shields.io/badge/godev-reference-00acd7?logo=go)](https://pkg.go.dev/github.com/ncruces/go-gcp/glog)

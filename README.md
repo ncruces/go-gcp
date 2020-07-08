@@ -1,3 +1,3 @@
 # [Google Cloud Platform](https://cloud.google.com/) utilities in Go
 
-[![GoDoc](https://godoc.org/github.com/ncruces/go-gcp?status.svg)](https://godoc.org/github.com/ncruces/go-gcp)
+[![GoDoc](https://img.shields.io/badge/godev-reference-00acd7?logo=go)](https://pkg.go.dev/github.com/ncruces/go-gcp)

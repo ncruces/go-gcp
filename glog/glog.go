@@ -1,8 +1,9 @@
-// Package glog implements basic logging for Google Cloud Run
+// Package glog implements structured logging for Google App Engine, Cloud Run
 // and Cloud Functions.
 package glog
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"strings"
 )
 
+// ProjectID should be set to the Google Cloud project ID.
 var ProjectID string = os.Getenv("GOOGLE_CLOUD_PROJECT")
 
 // Print logs an entry with no assigned severity level.
@@ -30,6 +32,12 @@ func Printf(format string, v ...interface{}) {
 	logf(defaultsv, Logger{}, format, v...)
 }
 
+// Printj logs an entry with no assigned severity level.
+// Arguments become jsonPayload in the log entry.
+func Printj(msg string, v interface{}) {
+	logj(defaultsv, Logger{}, msg, v)
+}
+
 // Debug logs debug or trace information.
 // Arguments are handled in the manner of fmt.Print.
 func Debug(v ...interface{}) {
@@ -46,6 +54,12 @@ func Debugln(v ...interface{}) {
 // Arguments are handled in the manner of fmt.Printf.
 func Debugf(format string, v ...interface{}) {
 	logf(debugsv, Logger{}, format, v...)
+}
+
+// Debugj logs debug or trace information.
+// Arguments become jsonPayload in the log entry.
+func Debugj(msg string, v interface{}) {
+	logj(debugsv, Logger{}, msg, v)
 }
 
 // Info logs routine information, such as ongoing status or performance.
@@ -66,6 +80,12 @@ func Infof(format string, v ...interface{}) {
 	logf(infosv, Logger{}, format, v...)
 }
 
+// Infoj logs routine information, such as ongoing status or performance.
+// Arguments become jsonPayload in the log entry.
+func Infoj(msg string, v interface{}) {
+	logj(infosv, Logger{}, msg, v)
+}
+
 // Notice logs normal but significant events, such as start up, shut down, or configuration.
 // Arguments are handled in the manner of fmt.Print.
 func Notice(v ...interface{}) {
@@ -82,6 +102,12 @@ func Noticeln(v ...interface{}) {
 // Arguments are handled in the manner of fmt.Printf.
 func Noticef(format string, v ...interface{}) {
 	logf(noticesv, Logger{}, format, v...)
+}
+
+// Noticej logs normal but significant events, such as start up, shut down, or configuration.
+// Arguments become jsonPayload in the log entry.
+func Noticej(msg string, v interface{}) {
+	logj(noticesv, Logger{}, msg, v)
 }
 
 // Warning logs events that might cause problems.
@@ -102,6 +128,12 @@ func Warningf(format string, v ...interface{}) {
 	logf(warningsv, Logger{}, format, v...)
 }
 
+// Warningj logs events that might cause problems.
+// Arguments become jsonPayload in the log entry.
+func Warningj(msg string, v interface{}) {
+	logj(warningsv, Logger{}, msg, v)
+}
+
 // Error logs events likely to cause problems.
 // Arguments are handled in the manner of fmt.Print.
 func Error(v ...interface{}) {
@@ -118,6 +150,12 @@ func Errorln(v ...interface{}) {
 // Arguments are handled in the manner of fmt.Printf.
 func Errorf(format string, v ...interface{}) {
 	logf(errorsv, Logger{}, format, v...)
+}
+
+// Errorj logs events likely to cause problems.
+// Arguments become jsonPayload in the log entry.
+func Errorj(msg string, v interface{}) {
+	logj(errorsv, Logger{}, msg, v)
 }
 
 // Critical logs events that cause more severe problems or outages.
@@ -138,6 +176,12 @@ func Criticalf(format string, v ...interface{}) {
 	logf(criticalsv, Logger{}, format, v...)
 }
 
+// Criticalj logs events that cause more severe problems or outages.
+// Arguments become jsonPayload in the log entry.
+func Criticalj(msg string, v interface{}) {
+	logj(criticalsv, Logger{}, msg, v)
+}
+
 // Alert logs when a person must take an action immediately.
 // Arguments are handled in the manner of fmt.Print.
 func Alert(v ...interface{}) {
@@ -154,6 +198,12 @@ func Alertln(v ...interface{}) {
 // Arguments are handled in the manner of fmt.Printf.
 func Alertf(format string, v ...interface{}) {
 	logf(alertsv, Logger{}, format, v...)
+}
+
+// Alertj logs when a person must take an action immediately.
+// Arguments become jsonPayload in the log entry.
+func Alertj(msg string, v interface{}) {
+	logj(alertsv, Logger{}, msg, v)
 }
 
 // Emergency logs when one or more systems are unusable.
@@ -174,6 +224,12 @@ func Emergencyf(format string, v ...interface{}) {
 	logf(emergencysv, Logger{}, format, v...)
 }
 
+// Emergencyj logs when one or more systems are unusable.
+// Arguments become jsonPayload in the log entry.
+func Emergencyj(msg string, v interface{}) {
+	logj(emergencysv, Logger{}, msg, v)
+}
+
 type Logger struct {
 	trace  string
 	spanID string
@@ -182,13 +238,9 @@ type Logger struct {
 func ForRequest(r *http.Request) (l Logger) {
 	if ProjectID != "" {
 		h := r.Header.Get("X-Cloud-Trace-Context")
-
-		i := strings.IndexByte(h, '/')
-		if i > 0 {
-			l.trace = fmt.Sprintf("projects/%s/traces/%s", ProjectID, h[0:i])
-			j := strings.IndexByte(h[i:], ';')
-			if j > 0 {
-				l.spanID = h[i : i+j]
+		if i := strings.IndexByte(h, '/'); i > 0 {
+			if t := h[:i]; strings.Count(t, "0") != len(t) {
+				l.trace = fmt.Sprintf("projects/%s/traces/%s", ProjectID, t)
 			}
 		}
 	}
@@ -213,6 +265,12 @@ func (l Logger) Printf(format string, v ...interface{}) {
 	logf(defaultsv, l, format, v...)
 }
 
+// Printj logs an entry with no assigned severity level.
+// Arguments become jsonPayload in the log entry.
+func (l Logger) Printj(msg string, v interface{}) {
+	logj(defaultsv, l, msg, v)
+}
+
 // Debug logs debug or trace information.
 // Arguments are handled in the manner of fmt.Print.
 func (l Logger) Debug(v ...interface{}) {
@@ -229,6 +287,12 @@ func (l Logger) Debugln(v ...interface{}) {
 // Arguments are handled in the manner of fmt.Printf.
 func (l Logger) Debugf(format string, v ...interface{}) {
 	logf(debugsv, l, format, v...)
+}
+
+// Debugj logs debug or trace information.
+// Arguments become jsonPayload in the log entry.
+func (l Logger) Debugj(msg string, v interface{}) {
+	logj(debugsv, l, msg, v)
 }
 
 // Info logs routine information, such as ongoing status or performance.
@@ -249,6 +313,12 @@ func (l Logger) Infof(format string, v ...interface{}) {
 	logf(infosv, l, format, v...)
 }
 
+// Infoj logs routine information, such as ongoing status or performance.
+// Arguments become jsonPayload in the log entry.
+func (l Logger) Infoj(msg string, v interface{}) {
+	logj(infosv, l, msg, v)
+}
+
 // Notice logs normal but significant events, such as start up, shut down, or configuration.
 // Arguments are handled in the manner of fmt.Print.
 func (l Logger) Notice(v ...interface{}) {
@@ -265,6 +335,12 @@ func (l Logger) Noticeln(v ...interface{}) {
 // Arguments are handled in the manner of fmt.Printf.
 func (l Logger) Noticef(format string, v ...interface{}) {
 	logf(noticesv, l, format, v...)
+}
+
+// Noticej logs normal but significant events, such as start up, shut down, or configuration.
+// Arguments become jsonPayload in the log entry.
+func (l Logger) Noticej(msg string, v interface{}) {
+	logj(noticesv, l, msg, v)
 }
 
 // Warning logs events that might cause problems.
@@ -285,6 +361,12 @@ func (l Logger) Warningf(format string, v ...interface{}) {
 	logf(warningsv, l, format, v...)
 }
 
+// Warningj logs events that might cause problems.
+// Arguments become jsonPayload in the log entry.
+func (l Logger) Warningj(msg string, v interface{}) {
+	logj(warningsv, l, msg, v)
+}
+
 // Error logs events likely to cause problems.
 // Arguments are handled in the manner of fmt.Print.
 func (l Logger) Error(v ...interface{}) {
@@ -301,6 +383,12 @@ func (l Logger) Errorln(v ...interface{}) {
 // Arguments are handled in the manner of fmt.Printf.
 func (l Logger) Errorf(format string, v ...interface{}) {
 	logf(errorsv, l, format, v...)
+}
+
+// Errorj logs events likely to cause problems.
+// Arguments become jsonPayload in the log entry.
+func (l Logger) Errorj(msg string, v interface{}) {
+	logj(errorsv, l, msg, v)
 }
 
 // Critical logs events that cause more severe problems or outages.
@@ -321,6 +409,12 @@ func (l Logger) Criticalf(format string, v ...interface{}) {
 	logf(criticalsv, l, format, v...)
 }
 
+// Criticalj logs events that cause more severe problems or outages.
+// Arguments become jsonPayload in the log entry.
+func (l Logger) Criticalj(msg string, v interface{}) {
+	logj(criticalsv, l, msg, v)
+}
+
 // Alert logs when a person must take an action immediately.
 // Arguments are handled in the manner of fmt.Print.
 func (l Logger) Alert(v ...interface{}) {
@@ -339,6 +433,12 @@ func (l Logger) Alertf(format string, v ...interface{}) {
 	logf(alertsv, l, format, v...)
 }
 
+// Alertj logs when a person must take an action immediately.
+// Arguments become jsonPayload in the log entry.
+func (l Logger) Alertj(msg string, v interface{}) {
+	logj(alertsv, l, msg, v)
+}
+
 // Emergency logs when one or more systems are unusable.
 // Arguments are handled in the manner of fmt.Print.
 func (l Logger) Emergency(v ...interface{}) {
@@ -355,6 +455,12 @@ func (l Logger) Emergencyln(v ...interface{}) {
 // Arguments are handled in the manner of fmt.Printf.
 func (l Logger) Emergencyf(format string, v ...interface{}) {
 	logf(emergencysv, l, format, v...)
+}
+
+// Emergencyj logs when one or more systems are unusable.
+// Arguments become jsonPayload in the log entry.
+func (l Logger) Emergencyj(msg string, v interface{}) {
+	logj(emergencysv, l, msg, v)
 }
 
 type severity int32
@@ -392,6 +498,14 @@ func (s severity) String() string {
 	}
 }
 
+func (s severity) File() *os.File {
+	if s >= errorsv {
+		return os.Stderr
+	} else {
+		return os.Stdout
+	}
+}
+
 func log(s severity, l Logger, v ...interface{}) {
 	logs(s, l, fmt.Sprint(v...))
 }
@@ -404,19 +518,37 @@ func logf(s severity, l Logger, format string, v ...interface{}) {
 	logs(s, l, fmt.Sprintf(format, v...))
 }
 
+func logs(s severity, l Logger, msg string) {
+	json.NewEncoder(s.File()).Encode(entry{msg, s.String(), l.trace})
+}
+
+func logj(s severity, l Logger, msg string, j interface{}) {
+	var buf bytes.Buffer
+
+	if err := json.NewEncoder(&buf).Encode(j); err != nil {
+		panic(err)
+	}
+
+	obj := make(map[string]json.RawMessage)
+	if err := json.NewDecoder(&buf).Decode(&obj); err != nil {
+		panic(err)
+	}
+
+	if v := msg; v != "" {
+		obj["message"], _ = json.Marshal(v)
+	}
+	if v := s.String(); v != "" {
+		obj["severity"], _ = json.Marshal(v)
+	}
+	if v := l.trace; v != "" {
+		obj["logging.googleapis.com/trace"], _ = json.Marshal(v)
+	}
+
+	json.NewEncoder(s.File()).Encode(obj)
+}
+
 type entry struct {
 	Message  string `json:"message"`
 	Severity string `json:"severity,omitempty"`
 	Trace    string `json:"logging.googleapis.com/trace,omitempty"`
-	SpanID   string `json:"logging.googleapis.com/spanId,omitempty"`
-}
-
-func logs(s severity, l Logger, msg string) {
-	var f *os.File
-	if s >= errorsv {
-		f = os.Stderr
-	} else {
-		f = os.Stdout
-	}
-	json.NewEncoder(f).Encode(entry{msg, s.String(), l.trace, l.spanID})
 }

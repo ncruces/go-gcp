@@ -13,3 +13,9 @@ func ExampleInfof() {
 	// Output:
 	// {"message":"Hello \"Google\"!","severity":"INFO"}
 }
+
+func ExampleWarningj() {
+	glog.Warningj("Warning", map[string]string{"component": "app"})
+	// Output:
+	// {"component":"app","message":"Warning","severity":"WARNING"}
+}

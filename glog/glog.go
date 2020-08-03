@@ -3,7 +3,6 @@
 package glog
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -523,14 +522,10 @@ func logs(s severity, l Logger, msg string) {
 }
 
 func logj(s severity, l Logger, msg string, j interface{}) {
-	var buf bytes.Buffer
-
-	if err := json.NewEncoder(&buf).Encode(j); err != nil {
-		panic(err)
-	}
-
 	obj := make(map[string]json.RawMessage)
-	if err := json.NewDecoder(&buf).Decode(&obj); err != nil {
+	if buf, err := json.Marshal(j); err != nil {
+		panic(err)
+	} else if err := json.Unmarshal(buf, &obj); err != nil {
 		panic(err)
 	}
 

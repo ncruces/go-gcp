@@ -10,223 +10,225 @@ import (
 	"strings"
 )
 
+var std Logger
+
 // ProjectID should be set to the Google Cloud project ID.
 var ProjectID string = os.Getenv("GOOGLE_CLOUD_PROJECT")
 
 // Print logs an entry with no assigned severity level.
 // Arguments are handled in the manner of fmt.Print.
 func Print(v ...interface{}) {
-	log(defaultsv, Logger{}, v...)
+	std.Print(v...)
 }
 
 // Println logs an entry with no assigned severity level.
 // Arguments are handled in the manner of fmt.Println.
 func Println(v ...interface{}) {
-	logln(defaultsv, Logger{}, v...)
+	std.Println(v...)
 }
 
 // Printf logs an entry with no assigned severity level.
 // Arguments are handled in the manner of fmt.Printf.
 func Printf(format string, v ...interface{}) {
-	logf(defaultsv, Logger{}, format, v...)
+	std.Printf(format, v...)
 }
 
 // Printj logs an entry with no assigned severity level.
 // Arguments become jsonPayload in the log entry.
 func Printj(msg string, v interface{}) {
-	logj(defaultsv, Logger{}, msg, v)
+	std.Printj(msg, v)
 }
 
 // Debug logs debug or trace information.
 // Arguments are handled in the manner of fmt.Print.
 func Debug(v ...interface{}) {
-	log(debugsv, Logger{}, v...)
+	std.Debug(v...)
 }
 
 // Debugln logs debug or trace information.
 // Arguments are handled in the manner of fmt.Println.
 func Debugln(v ...interface{}) {
-	logln(debugsv, Logger{}, v...)
+	std.Debugln(v...)
 }
 
 // Debugf logs debug or trace information.
 // Arguments are handled in the manner of fmt.Printf.
 func Debugf(format string, v ...interface{}) {
-	logf(debugsv, Logger{}, format, v...)
+	std.Debugf(format, v...)
 }
 
 // Debugj logs debug or trace information.
 // Arguments become jsonPayload in the log entry.
 func Debugj(msg string, v interface{}) {
-	logj(debugsv, Logger{}, msg, v)
+	std.Debugj(msg, v)
 }
 
 // Info logs routine information, such as ongoing status or performance.
 // Arguments are handled in the manner of fmt.Print.
 func Info(v ...interface{}) {
-	log(infosv, Logger{}, v...)
+	std.Info(v...)
 }
 
 // Infoln logs routine information, such as ongoing status or performance.
 // Arguments are handled in the manner of fmt.Println.
 func Infoln(v ...interface{}) {
-	logln(infosv, Logger{}, v...)
+	std.Infoln(v...)
 }
 
 // Infof logs routine information, such as ongoing status or performance.
 // Arguments are handled in the manner of fmt.Printf.
 func Infof(format string, v ...interface{}) {
-	logf(infosv, Logger{}, format, v...)
+	std.Infof(format, v...)
 }
 
 // Infoj logs routine information, such as ongoing status or performance.
 // Arguments become jsonPayload in the log entry.
 func Infoj(msg string, v interface{}) {
-	logj(infosv, Logger{}, msg, v)
+	std.Infoj(msg, v)
 }
 
 // Notice logs normal but significant events, such as start up, shut down, or configuration.
 // Arguments are handled in the manner of fmt.Print.
 func Notice(v ...interface{}) {
-	log(noticesv, Logger{}, v...)
+	std.Notice(v...)
 }
 
 // Noticeln logs normal but significant events, such as start up, shut down, or configuration.
 // Arguments are handled in the manner of fmt.Println.
 func Noticeln(v ...interface{}) {
-	logln(noticesv, Logger{}, v...)
+	std.Noticeln(v...)
 }
 
 // Noticef logs normal but significant events, such as start up, shut down, or configuration.
 // Arguments are handled in the manner of fmt.Printf.
 func Noticef(format string, v ...interface{}) {
-	logf(noticesv, Logger{}, format, v...)
+	std.Noticef(format, v...)
 }
 
 // Noticej logs normal but significant events, such as start up, shut down, or configuration.
 // Arguments become jsonPayload in the log entry.
 func Noticej(msg string, v interface{}) {
-	logj(noticesv, Logger{}, msg, v)
+	std.Noticej(msg, v)
 }
 
 // Warning logs events that might cause problems.
 // Arguments are handled in the manner of fmt.Print.
 func Warning(v ...interface{}) {
-	log(warningsv, Logger{}, v...)
+	std.Warning(v...)
 }
 
 // Warningln logs events that might cause problems.
 // Arguments are handled in the manner of fmt.Println.
 func Warningln(v ...interface{}) {
-	logln(warningsv, Logger{}, v...)
+	std.Warningln(v...)
 }
 
 // Warningf logs events that might cause problems.
 // Arguments are handled in the manner of fmt.Printf.
 func Warningf(format string, v ...interface{}) {
-	logf(warningsv, Logger{}, format, v...)
+	std.Warningf(format, v...)
 }
 
 // Warningj logs events that might cause problems.
 // Arguments become jsonPayload in the log entry.
 func Warningj(msg string, v interface{}) {
-	logj(warningsv, Logger{}, msg, v)
+	std.Warningj(msg, v)
 }
 
 // Error logs events likely to cause problems.
 // Arguments are handled in the manner of fmt.Print.
 func Error(v ...interface{}) {
-	log(errorsv, Logger{}, v...)
+	std.Error(v...)
 }
 
 // Errorln logs events likely to cause problems.
 // Arguments are handled in the manner of fmt.Println.
 func Errorln(v ...interface{}) {
-	logln(errorsv, Logger{}, v...)
+	std.Errorln(v...)
 }
 
 // Errorf logs events likely to cause problems.
 // Arguments are handled in the manner of fmt.Printf.
 func Errorf(format string, v ...interface{}) {
-	logf(errorsv, Logger{}, format, v...)
+	std.Errorf(format, v...)
 }
 
 // Errorj logs events likely to cause problems.
 // Arguments become jsonPayload in the log entry.
 func Errorj(msg string, v interface{}) {
-	logj(errorsv, Logger{}, msg, v)
+	std.Errorj(msg, v)
 }
 
 // Critical logs events that cause more severe problems or outages.
 // Arguments are handled in the manner of fmt.Print.
 func Critical(v ...interface{}) {
-	log(criticalsv, Logger{}, v...)
+	std.Critical(v...)
 }
 
 // Criticalln logs events that cause more severe problems or outages.
 // Arguments are handled in the manner of fmt.Println.
 func Criticalln(v ...interface{}) {
-	logln(criticalsv, Logger{}, v...)
+	std.Criticalln(v...)
 }
 
 // Criticalf logs events that cause more severe problems or outages.
 // Arguments are handled in the manner of fmt.Printf.
 func Criticalf(format string, v ...interface{}) {
-	logf(criticalsv, Logger{}, format, v...)
+	std.Criticalf(format, v...)
 }
 
 // Criticalj logs events that cause more severe problems or outages.
 // Arguments become jsonPayload in the log entry.
 func Criticalj(msg string, v interface{}) {
-	logj(criticalsv, Logger{}, msg, v)
+	std.Criticalj(msg, v)
 }
 
 // Alert logs when a person must take an action immediately.
 // Arguments are handled in the manner of fmt.Print.
 func Alert(v ...interface{}) {
-	log(alertsv, Logger{}, v...)
+	std.Alert(v...)
 }
 
 // Alertln logs when a person must take an action immediately.
 // Arguments are handled in the manner of fmt.Println.
 func Alertln(v ...interface{}) {
-	logln(alertsv, Logger{}, v...)
+	std.Alertln(v...)
 }
 
 // Alertf logs when a person must take an action immediately.
 // Arguments are handled in the manner of fmt.Printf.
 func Alertf(format string, v ...interface{}) {
-	logf(alertsv, Logger{}, format, v...)
+	std.Alertf(format, v...)
 }
 
 // Alertj logs when a person must take an action immediately.
 // Arguments become jsonPayload in the log entry.
 func Alertj(msg string, v interface{}) {
-	logj(alertsv, Logger{}, msg, v)
+	std.Alertj(msg, v)
 }
 
 // Emergency logs when one or more systems are unusable.
 // Arguments are handled in the manner of fmt.Print.
 func Emergency(v ...interface{}) {
-	log(emergencysv, Logger{}, v...)
+	std.Emergency(v...)
 }
 
 // Emergencyln logs when one or more systems are unusable.
 // Arguments are handled in the manner of fmt.Println.
 func Emergencyln(v ...interface{}) {
-	logln(emergencysv, Logger{}, v...)
+	std.Emergencyln(v...)
 }
 
 // Emergencyf logs when one or more systems are unusable.
 // Arguments are handled in the manner of fmt.Printf.
 func Emergencyf(format string, v ...interface{}) {
-	logf(emergencysv, Logger{}, format, v...)
+	std.Emergencyf(format, v...)
 }
 
 // Emergencyj logs when one or more systems are unusable.
 // Arguments become jsonPayload in the log entry.
 func Emergencyj(msg string, v interface{}) {
-	logj(emergencysv, Logger{}, msg, v)
+	std.Emergencyj(msg, v)
 }
 
 type Logger struct {
@@ -518,28 +520,29 @@ func logf(s severity, l Logger, format string, v ...interface{}) {
 }
 
 func logs(s severity, l Logger, msg string) {
-	json.NewEncoder(s.File()).Encode(entry{msg, s.String(), l.trace})
+	entry := entry{msg, s.String(), l.trace}
+	json.NewEncoder(s.File()).Encode(entry)
 }
 
 func logj(s severity, l Logger, msg string, j interface{}) {
-	obj := make(map[string]json.RawMessage)
+	entry := make(map[string]json.RawMessage)
 	if buf, err := json.Marshal(j); err != nil {
 		panic(err)
-	} else if err := json.Unmarshal(buf, &obj); err != nil {
+	} else if err := json.Unmarshal(buf, &entry); err != nil {
 		panic(err)
 	}
 
 	if v := msg; v != "" {
-		obj["message"], _ = json.Marshal(v)
+		entry["message"], _ = json.Marshal(v)
 	}
 	if v := s.String(); v != "" {
-		obj["severity"], _ = json.Marshal(v)
+		entry["severity"], _ = json.Marshal(v)
 	}
 	if v := l.trace; v != "" {
-		obj["logging.googleapis.com/trace"], _ = json.Marshal(v)
+		entry["logging.googleapis.com/trace"], _ = json.Marshal(v)
 	}
 
-	json.NewEncoder(s.File()).Encode(obj)
+	json.NewEncoder(s.File()).Encode(entry)
 }
 
 type entry struct {

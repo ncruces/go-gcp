@@ -18,7 +18,7 @@ func Example() {
 		port = "8080"
 	}
 
-	http.HandleFunc("/", handleFunc)
+	http.HandleFunc("/", http.NotFound)
 
 	glog.Critical(http.ListenAndServe(":"+port, &ochttp.Handler{
 		Propagation: &gtrace.HTTPFormat{},

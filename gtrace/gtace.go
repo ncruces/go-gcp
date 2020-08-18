@@ -1,3 +1,4 @@
+// Package gtrace implements tracing for Google Cloud Run and Cloud Functions.
 package gtrace
 
 import (
@@ -13,6 +14,9 @@ import (
 
 var once sync.Once
 
+// Init initializes Cloud Trace.
+// Can be called multiple times.
+// Logs the error when called asynchronously.
 func Init() (err error) {
 	_, _, _, caller := runtime.Caller(2)
 
@@ -31,6 +35,8 @@ func Init() (err error) {
 	return
 }
 
+// HTTPFormat implements propagation.HTTPFormat to propagate traces in
+// HTTP headers for Cloud Trace.
 type HTTPFormat struct {
 	propagation.HTTPFormat
 }

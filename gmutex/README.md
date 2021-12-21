@@ -2,7 +2,7 @@
 
 [![PkgGoDev](https://pkg.go.dev/badge/image)](https://pkg.go.dev/github.com/ncruces/go-gcp/gmutex)
 
-Work in Progress, based on [github.com/marcacohen/gcslock](https://github.com/marcacohen/gcslock).
+Work in Progress, based on _[“A robust distributed locking algorithm based on Google Cloud Storage”][1]_ and
+[github.com/marcacohen/gcslock](https://github.com/marcacohen/gcslock).
 
-Major goal is to have locks that expire automatically after some time.
-Other improvements include reusing the HTTP client between locks.
+[1]: https://www.joyfulbikeshedding.com/blog/2021-05-19-robust-distributed-locking-algorithm-based-on-google-cloud-storage.html

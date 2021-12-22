@@ -3,6 +3,7 @@ package gmutex
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -10,15 +11,26 @@ import (
 	"time"
 )
 
-// A Mutex is a global mutual exclusion lock.
+// A Mutex is a global, mutual exclusion lock
+// that uses an object in Google Cloud Storage
+// to serialize computations across the internet.
+//
+// A Mutex can optionally have data attached to it while it is held.
+// While there is no limit to the size of this data,
+// it is best kept small.
+//
+// An instance of Mutex is not associated with a particular goroutine
+// (it is allowed for one goroutine to lock a Mutex
+// and then arrange for another goroutine to unlock it),
+// but it is not safe for concurrent use by multiple goroutines.
 type Mutex struct {
 	_   noCopy
 	url string
-	gen string
 	ttl time.Duration
+	gen string // mutable state
 }
 
-// New creates a new Mutex at a given bucket and object,
+// New creates a new Mutex at the given bucket and object,
 // with the given time-to-live.
 func New(ctx context.Context, bucket, object string, ttl time.Duration) (*Mutex, error) {
 	if err := initClient(ctx); err != nil {
@@ -35,20 +47,32 @@ func New(ctx context.Context, bucket, object string, ttl time.Duration) (*Mutex,
 	}, nil
 }
 
-// Locker gets a Locker that uses context.Background and panics on error.
+// Locker gets a Locker that uses context.Background to call Lock and Unlock,
+// and panics on error.
 func (m *Mutex) Locker() sync.Locker {
 	return locker{m}
 }
 
-// LockContext locks m.
-// If the lock is already in use, the calling goroutine
-// blocks until the mutex is available, or the context expires.
+// Lock locks m.
+// If the lock is already in use,
+// the calling goroutine blocks until the mutex is available,
+// or the context expires.
 // Returns nil if the lock was taken successfully.
-func (m *Mutex) LockContext(ctx context.Context) error {
+func (m *Mutex) Lock(ctx context.Context) error {
+	return m.LockData(ctx, nil)
+}
+
+// LockData locks m with attached data.
+// If the lock is already in use,
+// the calling goroutine blocks until the mutex is available,
+// or the context expires.
+// Returns nil if the lock was taken successfully
+// (and the attached data stored).
+func (m *Mutex) LockData(ctx context.Context, data io.Reader) error {
 	var backoff expBackOff
 	for i := 0; ; i++ {
 		// Create the lock object, if it does not yet exist.
-		status := m.createObject(ctx, "0")
+		status := m.createObject(ctx, "0", data)
 		if status == http.StatusOK {
 			// Lock acquired.
 			return nil
@@ -59,6 +83,7 @@ func (m *Mutex) LockContext(ctx context.Context) error {
 			continue
 		}
 		// If the lock is contended, wait for it to expire.
+		// This is much cheaper than repeatedly trying to acquire it.
 		if status == http.StatusTooManyRequests || i > 2 {
 			i = 0
 			for {
@@ -80,14 +105,50 @@ func (m *Mutex) LockContext(ctx context.Context) error {
 	}
 }
 
-// UnlockContext unlocks m.
+// TryLock tries to lock m.
+// Returns true if the lock was taken successfully,
+// false if the lock is already in use.
+func (m *Mutex) TryLock(ctx context.Context) (bool, error) {
+	return m.TryLockData(ctx, nil)
+}
+
+// TryLockData tries to lock m with attached data.
+// Returns true if the lock was taken successfully
+// (and the attached data stored),
+// false if the lock is already in use.
+func (m *Mutex) TryLockData(ctx context.Context, data io.Reader) (bool, error) {
+	var backoff expBackOff
+	for i := 0; ; i++ {
+		// Create the lock object, if it does not yet exist.
+		status := m.createObject(ctx, "0", data)
+		if status == http.StatusOK {
+			// Lock acquired.
+			return true, nil
+		}
+		// If the lock object already existed, check if it is expired.
+		if status == http.StatusPreconditionFailed {
+			if m.expireObject(ctx) {
+				// Lock expired, retry immediately.
+				continue
+			}
+			// Lock held, give up.
+			return false, nil
+		}
+		// If the lock is contended, give up.
+		if status == http.StatusTooManyRequests || i > 2 {
+			return false, nil
+		}
+		// Exponential backoff.
+		if err := backoff.wait(ctx); err != nil {
+			return false, err
+		}
+	}
+}
+
+// Unlock unlocks m, deleting any attached data.
 // Returns an error if the lock had already expired, and mutual
-// exclusion was not assured.
-//
-// A locked Mutex is not associated with a particular goroutine.
-// It is allowed for one goroutine to lock a Mutex and then
-// arrange for another goroutine to unlock it.
-func (m *Mutex) UnlockContext(ctx context.Context) error {
+// exclusion was not ensured.
+func (m *Mutex) Unlock(ctx context.Context) error {
 	var backoff linBackOff
 	for {
 		// Delete the lock object, if we still own it.
@@ -106,18 +167,14 @@ func (m *Mutex) UnlockContext(ctx context.Context) error {
 	}
 }
 
-// ExtendContext extends the expiration date of m.
+// Update updates attached data, extending the expiration time of m.
 // Returns an error if the lock has already expired, and mutual
 // exclusion can not be ensured.
-//
-// A locked Mutex is not associated with a particular goroutine.
-// It is allowed for one goroutine to lock a Mutex and then
-// arrange for another goroutine to extend it.
-func (m *Mutex) ExtendContext(ctx context.Context) error {
+func (m *Mutex) Update(ctx context.Context, data io.Reader) error {
 	var backoff linBackOff
 	for {
 		// Update the lock object, if we still own it.
-		status := m.createObject(ctx, m.gen)
+		status := m.createObject(ctx, m.gen, data)
 		if status == http.StatusOK {
 			return nil
 		}
@@ -132,9 +189,9 @@ func (m *Mutex) ExtendContext(ctx context.Context) error {
 	}
 }
 
-func (m *Mutex) createObject(ctx context.Context, generation string) int {
+func (m *Mutex) createObject(ctx context.Context, generation string, data io.Reader) int {
 	// Create/update the lock object if the generation matches.
-	req, err := http.NewRequestWithContext(ctx, "PUT", m.url, http.NoBody)
+	req, err := http.NewRequestWithContext(ctx, "PUT", m.url, data)
 	if err != nil {
 		panic(err)
 	}

@@ -19,6 +19,13 @@ import (
 // While there is no limit to the size of this data,
 // it is best kept small.
 //
+// Given the latency and scalability properties of Google Cloud Storage,
+// a Mutex is best used to serialize long-running, high-latency
+// compute processes.
+// Critical sections should span seconds.
+// Expect an uncontended mutex to take tens to hundreds of milliseconds
+// to acquire, and a contended one multiple seconds after release.
+//
 // An instance of Mutex is not associated with a particular goroutine
 // (it is allowed for one goroutine to lock a Mutex
 // and then arrange for another goroutine to unlock it),
@@ -69,10 +76,13 @@ func (m *Mutex) Lock(ctx context.Context) error {
 // Returns nil if the lock was taken successfully
 // (and the attached data stored).
 func (m *Mutex) LockData(ctx context.Context, data io.Reader) error {
+	if m.gen != "" {
+		panic("gmutex: lock of locked mutex")
+	}
 	var backoff expBackOff
 	for i := 0; ; i++ {
 		// Create the lock object, if it does not yet exist.
-		status := m.createObject(ctx, "0", data)
+		status, _ := m.createObject(ctx, "0", data)
 		if status == http.StatusOK {
 			// Lock acquired.
 			return nil
@@ -117,10 +127,13 @@ func (m *Mutex) TryLock(ctx context.Context) (bool, error) {
 // (and the attached data stored),
 // false if the lock is already in use.
 func (m *Mutex) TryLockData(ctx context.Context, data io.Reader) (bool, error) {
+	if m.gen != "" {
+		panic("gmutex: lock of locked mutex")
+	}
 	var backoff expBackOff
 	for i := 0; ; i++ {
 		// Create the lock object, if it does not yet exist.
-		status := m.createObject(ctx, "0", data)
+		status, err := m.createObject(ctx, "0", data)
 		if status == http.StatusOK {
 			// Lock acquired.
 			return true, nil
@@ -136,7 +149,7 @@ func (m *Mutex) TryLockData(ctx context.Context, data io.Reader) (bool, error) {
 		}
 		// If the lock is contended, give up.
 		if status == http.StatusTooManyRequests || i > 2 {
-			return false, nil
+			return false, err
 		}
 		// Exponential backoff.
 		if err := backoff.wait(ctx); err != nil {
@@ -149,6 +162,9 @@ func (m *Mutex) TryLockData(ctx context.Context, data io.Reader) (bool, error) {
 // Returns an error if the lock had already expired, and mutual
 // exclusion was not ensured.
 func (m *Mutex) Unlock(ctx context.Context) error {
+	if m.gen == "" {
+		panic("gmutex: unlock of unlocked mutex")
+	}
 	var backoff linBackOff
 	for {
 		// Delete the lock object, if we still own it.
@@ -171,10 +187,13 @@ func (m *Mutex) Unlock(ctx context.Context) error {
 // Returns an error if the lock has already expired, and mutual
 // exclusion can not be ensured.
 func (m *Mutex) Update(ctx context.Context, data io.Reader) error {
+	if m.gen == "" {
+		panic("gmutex: update of unlocked mutex")
+	}
 	var backoff linBackOff
 	for {
 		// Update the lock object, if we still own it.
-		status := m.createObject(ctx, m.gen, data)
+		status, _ := m.createObject(ctx, m.gen, data)
 		if status == http.StatusOK {
 			return nil
 		}
@@ -189,7 +208,26 @@ func (m *Mutex) Update(ctx context.Context, data io.Reader) error {
 	}
 }
 
-func (m *Mutex) createObject(ctx context.Context, generation string, data io.Reader) int {
+// Inspect inspects m, returning its locked state and fetching attached data.
+func (m *Mutex) Inspect(ctx context.Context, data io.Writer) (bool, error) {
+	var backoff expBackOff
+	for i := 0; ; i++ {
+		// Inspect the lock object.
+		status, err := m.inspectObject(ctx, data)
+		if status == http.StatusOK {
+			return true, err
+		}
+		if status == http.StatusNotFound {
+			return false, err
+		}
+		// Exponential backoff.
+		if err := backoff.wait(ctx); err != nil {
+			return false, err
+		}
+	}
+}
+
+func (m *Mutex) createObject(ctx context.Context, generation string, data io.Reader) (int, error) {
 	// Create/update the lock object if the generation matches.
 	req, err := http.NewRequestWithContext(ctx, "PUT", m.url, data)
 	if err != nil {
@@ -201,18 +239,18 @@ func (m *Mutex) createObject(ctx context.Context, generation string, data io.Rea
 
 	res, err := HttpClient.Do(req)
 	if err != nil {
-		return 0
+		return 0, err
 	}
 	res.Body.Close()
 	if res.StatusCode == http.StatusOK {
 		m.gen = res.Header.Get("x-goog-generation")
 	}
-	return res.StatusCode
+	return res.StatusCode, nil
 }
 
 func (m *Mutex) deleteObject(ctx context.Context, generation string) int {
 	// Delete the lock object if the generation matches.
-	req, err := http.NewRequestWithContext(ctx, "DELETE", m.url, http.NoBody)
+	req, err := http.NewRequestWithContext(ctx, "DELETE", m.url, nil)
 	if err != nil {
 		panic(err)
 	}
@@ -226,9 +264,40 @@ func (m *Mutex) deleteObject(ctx context.Context, generation string) int {
 	return res.StatusCode
 }
 
+func (m *Mutex) inspectObject(ctx context.Context, data io.Writer) (int, error) {
+	var method string
+	if data == nil {
+		method = "HEAD"
+	}
+
+	// Inspect the lock object's status.
+	req, err := http.NewRequestWithContext(ctx, method, m.url, nil)
+	if err != nil {
+		panic(err)
+	}
+	req.Header.Set("Cache-Control", "no-cache")
+
+	res, err := HttpClient.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer res.Body.Close()
+
+	// If it exists, but is expired, act as if it didn't.
+	if res.StatusCode == http.StatusOK && checkExpired(res) {
+		return http.StatusNotFound, nil
+	}
+
+	if res.StatusCode == http.StatusOK && data != nil {
+		_, err := io.Copy(data, res.Body)
+		return res.StatusCode, err
+	}
+	return res.StatusCode, nil
+}
+
 func (m *Mutex) expireObject(ctx context.Context) bool {
 	// Inspect the lock object's status.
-	req, err := http.NewRequestWithContext(ctx, "HEAD", m.url, http.NoBody)
+	req, err := http.NewRequestWithContext(ctx, "HEAD", m.url, nil)
 	if err != nil {
 		panic(err)
 	}
@@ -243,26 +312,28 @@ func (m *Mutex) expireObject(ctx context.Context) bool {
 	if res.StatusCode == http.StatusNotFound {
 		return true
 	}
-	// If it still exists, check for expiration using server time.
-	if res.StatusCode == http.StatusOK {
-		ttl, err := strconv.ParseInt(res.Header.Get("x-goog-meta-ttl"), 10, 64)
-		if err != nil || ttl <= 0 {
-			return false
-		}
-		now, err := http.ParseTime(res.Header.Get("Date"))
-		if err != nil {
-			return false
-		}
-		modifed, err := http.ParseTime(res.Header.Get("Last-Modified"))
-		if err != nil {
-			return false
-		}
-		// Delete the lock object, if it is expired.
-		expires := modifed.Add(time.Duration(ttl) * time.Second)
-		if expires.Before(now) {
-			status := m.deleteObject(ctx, res.Header.Get("x-goog-generation"))
-			return status == http.StatusOK || status == http.StatusNoContent || status == http.StatusNotFound
-		}
+	// If it still exists, but is expired, delete it.
+	if res.StatusCode == http.StatusOK && checkExpired(res) {
+		status := m.deleteObject(ctx, res.Header.Get("x-goog-generation"))
+		return status == http.StatusOK || status == http.StatusNoContent || status == http.StatusNotFound
 	}
 	return false
+}
+
+func checkExpired(res *http.Response) bool {
+	// Check for expiration using server date.
+	ttl, err := strconv.ParseInt(res.Header.Get("x-goog-meta-ttl"), 10, 64)
+	if err != nil || ttl <= 0 {
+		return false
+	}
+	now, err := http.ParseTime(res.Header.Get("Date"))
+	if err != nil {
+		return false
+	}
+	modifed, err := http.ParseTime(res.Header.Get("Last-Modified"))
+	if err != nil {
+		return false
+	}
+	expires := modifed.Add(time.Duration(ttl) * time.Second)
+	return expires.Before(now)
 }

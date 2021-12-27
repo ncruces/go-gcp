@@ -215,6 +215,16 @@ func (m *Mutex) Unlock(ctx context.Context) error {
 	}
 }
 
+// Extend extends the expiration time of m.
+// Returns an error if the lock has already expired,
+// and mutual exclusion can not be ensured.
+func (m *Mutex) Extend(ctx context.Context) error {
+	if m.gen == "" {
+		panic("gmutex: extend of unlocked mutex")
+	}
+	return m.Update(ctx, nil)
+}
+
 // Update updates attached data, extending the expiration time of m.
 // Returns an error if the lock has already expired,
 // and mutual exclusion can not be ensured.

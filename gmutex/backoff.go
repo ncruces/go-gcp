@@ -34,7 +34,7 @@ func (b *linBackOff) wait(ctx context.Context) error {
 }
 
 func (b *expBackOff) wait(ctx context.Context) error {
-	b.time += b.time
+	b.time += b.time / 2
 	if b.time < backOffMin {
 		b.time = backOffMin
 	}

@@ -3,6 +3,7 @@ package gmutex
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -79,39 +80,41 @@ func (m *Mutex) LockData(ctx context.Context, data io.Reader) error {
 	if m.gen != "" {
 		panic("gmutex: lock of locked mutex")
 	}
-	var backoff expBackOff
-	for i := 0; ; i++ {
-		// Create the lock object, if it does not yet exist.
-		status, _ := m.createObject(ctx, "0", data)
+
+	var backoff expBackOff // Exponential backoff because we don't hold the lock.
+	generation := ""       // Empty generation because we expect the lock not to exist.
+
+	for {
+		// Create the lock object, at the expected generation.
+		status, gen, err := m.createObject(ctx, generation, data)
 		if status == http.StatusOK {
 			// Lock acquired.
+			m.gen = gen
 			return nil
 		}
-		// If the lock object already existed, check if it is expired.
-		if status == http.StatusPreconditionFailed && m.expireObject(ctx) {
-			// Lock expired, retry immediately.
-			continue
+
+		// If the lock object exists at another generation, let's inspect it.
+		if status == http.StatusPreconditionFailed {
+			status, gen, err = m.inspectObject(ctx, nil)
 		}
-		// If the lock is contended, wait for it to expire.
-		// This is much cheaper than repeatedly trying to acquire it.
-		if status == http.StatusTooManyRequests || i > 2 {
-			i = 0
-			for {
-				// Exponential backoff.
-				if err := backoff.wait(ctx); err != nil {
-					return err
-				}
-				if m.expireObject(ctx) {
-					break
-				}
+		// While the lock object exists, and for transient errors, backoff and retry.
+		for status == http.StatusOK || retriable(status, err) {
+			if err := backoff.wait(ctx); err != nil {
+				return err
 			}
-			// Lock expired, retry immediately.
+			status, gen, err = m.inspectObject(ctx, nil)
+		}
+		// If the lock object no longer exists, or has expired, we can acquire it.
+		if status == http.StatusNotFound {
+			generation = gen
 			continue
 		}
-		// Exponential backoff.
-		if err := backoff.wait(ctx); err != nil {
-			return err
+
+		// Can't recover, give up.
+		if err != nil {
+			return fmt.Errorf("lock mutex: %w", err)
 		}
+		return fmt.Errorf("lock mutex: http status %d: %s", status, http.StatusText(status))
 	}
 }
 
@@ -130,31 +133,46 @@ func (m *Mutex) TryLockData(ctx context.Context, data io.Reader) (bool, error) {
 	if m.gen != "" {
 		panic("gmutex: lock of locked mutex")
 	}
-	var backoff expBackOff
-	for i := 0; ; i++ {
-		// Create the lock object, if it does not yet exist.
-		status, err := m.createObject(ctx, "0", data)
+
+	var backoff expBackOff // Exponential backoff because we don't hold the lock.
+	generation := ""       // Empty generation because we expect the lock not to exist.
+
+	for {
+		// Create the lock object, at the expected generation.
+		status, gen, err := m.createObject(ctx, generation, data)
 		if status == http.StatusOK {
 			// Lock acquired.
+			m.gen = gen
 			return true, nil
 		}
-		// If the lock object already existed, check if it is expired.
+
+		// If the lock object exists at another generation, let's inspect it.
 		if status == http.StatusPreconditionFailed {
-			if m.expireObject(ctx) {
-				// Lock expired, retry immediately.
-				continue
+			status, gen, err = m.inspectObject(ctx, nil)
+		}
+		// For transient errors, backoff and retry.
+		for retriable(status, err) {
+			if err := backoff.wait(ctx); err != nil {
+				return false, err
 			}
+			status, gen, err = m.inspectObject(ctx, nil)
+		}
+		// If the lock object no longer exists, or has expired, we can acquire it.
+		if status == http.StatusNotFound {
+			generation = gen
+			continue
+		}
+		// If the lock object exists.
+		if status == http.StatusOK {
 			// Lock held, give up.
 			return false, nil
 		}
-		// If the lock is contended, give up.
-		if status == http.StatusTooManyRequests || i > 2 {
-			return false, err
+
+		// Can't recover, give up.
+		if err != nil {
+			return false, fmt.Errorf("lock mutex: %w", err)
 		}
-		// Exponential backoff.
-		if err := backoff.wait(ctx); err != nil {
-			return false, err
-		}
+		return false, fmt.Errorf("lock mutex: http status %d: %s", status, http.StatusText(status))
 	}
 }
 
@@ -165,21 +183,35 @@ func (m *Mutex) Unlock(ctx context.Context) error {
 	if m.gen == "" {
 		panic("gmutex: unlock of unlocked mutex")
 	}
-	var backoff linBackOff
+
+	var backoff linBackOff // Linear backoff because we hold the lock.
+
 	for {
-		// Delete the lock object, if we still own it.
-		status := m.deleteObject(ctx, m.gen)
+		// Delete the lock object, at the expected generation.
+		status, err := m.deleteObject(ctx, m.gen)
 		if status == http.StatusOK || status == http.StatusNoContent {
+			m.gen = ""
 			return nil
 		}
-		// If we no longer owned it, or it doesn't exist, report error.
+
+		// If the lock object exists at another generation, or no longer exists, it is stale.
 		if status == http.StatusPreconditionFailed || status == http.StatusNotFound {
-			return errors.New("failed to unlock mutex: stale lock")
+			return errors.New("unlock mutex: stale lock")
 		}
-		// Linear backoff.
-		if err := backoff.wait(ctx); err != nil {
-			return err
+
+		// For transient errors, backoff and retry.
+		if retriable(status, err) {
+			if err := backoff.wait(ctx); err != nil {
+				return err
+			}
+			continue
 		}
+
+		// Can't recover, give up.
+		if err != nil {
+			return fmt.Errorf("unlock mutex: %w", err)
+		}
+		return fmt.Errorf("unlock mutex: http status %d: %s", status, http.StatusText(status))
 	}
 }
 
@@ -190,44 +222,74 @@ func (m *Mutex) Update(ctx context.Context, data io.Reader) error {
 	if m.gen == "" {
 		panic("gmutex: update of unlocked mutex")
 	}
-	var backoff linBackOff
+
+	var backoff linBackOff // Linear backoff because we hold the lock.
+
 	for {
-		// Update the lock object, if we still own it.
-		status, _ := m.createObject(ctx, m.gen, data)
+		// Update the lock object, at the expected generation.
+		status, gen, err := m.createObject(ctx, m.gen, data)
 		if status == http.StatusOK {
+			// Lock updated.
+			m.gen = gen
 			return nil
 		}
-		// If we no longer owned it, or it doesn't exist, abort.
+
+		// If the lock object exists at another generation, or no longer exists, it is stale.
 		if status == http.StatusPreconditionFailed || status == http.StatusNotFound {
-			return errors.New("failed to extend mutex: stale lock, abort")
+			return errors.New("update mutex: stale lock, abort")
 		}
-		// Linear backoff.
-		if err := backoff.wait(ctx); err != nil {
-			return err
+
+		// For transient errors, backoff and retry.
+		if retriable(status, err) {
+			if err := backoff.wait(ctx); err != nil {
+				return err
+			}
+			continue
 		}
+
+		// Can't recover, give up.
+		if err != nil {
+			return fmt.Errorf("update mutex: %w", err)
+		}
+		return fmt.Errorf("update mutex: http status %d: %s", status, http.StatusText(status))
 	}
 }
 
 // Inspect inspects m, returning its locked state and fetching attached data.
 func (m *Mutex) Inspect(ctx context.Context, data io.Writer) (bool, error) {
-	var backoff expBackOff
-	for i := 0; ; i++ {
+	var backoff expBackOff // Exponential backoff because we don't hold the lock.
+
+	for {
 		// Inspect the lock object.
-		status, err := m.inspectObject(ctx, data)
+		status, _, err := m.inspectObject(ctx, data)
 		if status == http.StatusOK {
-			return true, err
+			return true, nil
 		}
 		if status == http.StatusNotFound {
-			return false, err
+			return false, nil
 		}
-		// Exponential backoff.
-		if err := backoff.wait(ctx); err != nil {
-			return false, err
+
+		// For transient errors, backoff and retry.
+		if retriable(status, err) {
+			if err := backoff.wait(ctx); err != nil {
+				return false, err
+			}
+			continue
 		}
+
+		// Can't recover, give up.
+		if err != nil {
+			return false, fmt.Errorf("inspect mutex: %w", err)
+		}
+		return false, fmt.Errorf("inspect mutex: http status %d: %s", status, http.StatusText(status))
 	}
 }
 
-func (m *Mutex) createObject(ctx context.Context, generation string, data io.Reader) (int, error) {
+func (m *Mutex) createObject(ctx context.Context, generation string, data io.Reader) (int, string, error) {
+	if generation == "" {
+		generation = "0"
+	}
+
 	// Create/update the lock object if the generation matches.
 	req, err := http.NewRequestWithContext(ctx, "PUT", m.url, data)
 	if err != nil {
@@ -239,16 +301,13 @@ func (m *Mutex) createObject(ctx context.Context, generation string, data io.Rea
 
 	res, err := HttpClient.Do(req)
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
 	res.Body.Close()
-	if res.StatusCode == http.StatusOK {
-		m.gen = res.Header.Get("x-goog-generation")
-	}
-	return res.StatusCode, nil
+	return res.StatusCode, res.Header.Get("x-goog-generation"), nil
 }
 
-func (m *Mutex) deleteObject(ctx context.Context, generation string) int {
+func (m *Mutex) deleteObject(ctx context.Context, generation string) (int, error) {
 	// Delete the lock object if the generation matches.
 	req, err := http.NewRequestWithContext(ctx, "DELETE", m.url, nil)
 	if err != nil {
@@ -258,19 +317,19 @@ func (m *Mutex) deleteObject(ctx context.Context, generation string) int {
 
 	res, err := HttpClient.Do(req)
 	if err != nil {
-		return 0
+		return 0, err
 	}
 	res.Body.Close()
-	return res.StatusCode
+	return res.StatusCode, nil
 }
 
-func (m *Mutex) inspectObject(ctx context.Context, data io.Writer) (int, error) {
+func (m *Mutex) inspectObject(ctx context.Context, data io.Writer) (int, string, error) {
 	var method string
 	if data == nil {
 		method = "HEAD"
 	}
 
-	// Inspect the lock object's status.
+	// Get the lock object's status.
 	req, err := http.NewRequestWithContext(ctx, method, m.url, nil)
 	if err != nil {
 		panic(err)
@@ -279,61 +338,48 @@ func (m *Mutex) inspectObject(ctx context.Context, data io.Writer) (int, error) 
 
 	res, err := HttpClient.Do(req)
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
 	defer res.Body.Close()
 
 	// If it exists, but is expired, act as if it didn't.
-	if res.StatusCode == http.StatusOK && checkExpired(res) {
-		return http.StatusNotFound, nil
+	if res.StatusCode == http.StatusOK && expired(res) {
+		res.StatusCode = http.StatusNotFound
 	}
-
 	if res.StatusCode == http.StatusOK && data != nil {
-		_, err := io.Copy(data, res.Body)
-		return res.StatusCode, err
+		_, err = io.Copy(data, res.Body)
 	}
-	return res.StatusCode, nil
+	return res.StatusCode, res.Header.Get("x-goog-generation"), nil
 }
 
-func (m *Mutex) expireObject(ctx context.Context) bool {
-	// Inspect the lock object's status.
-	req, err := http.NewRequestWithContext(ctx, "HEAD", m.url, nil)
+func retriable(status int, err error) bool {
+	// Retry on temporary errors and timeouts.
 	if err != nil {
-		panic(err)
+		uerr := url.Error{Err: err}
+		return uerr.Temporary() || uerr.Timeout()
 	}
-	req.Header.Set("Cache-Control", "no-cache")
-
-	res, err := HttpClient.Do(req)
-	if err != nil {
-		return false
-	}
-	res.Body.Close()
-	// If it no longer exists, it's as good as expired.
-	if res.StatusCode == http.StatusNotFound {
-		return true
-	}
-	// If it still exists, but is expired, delete it.
-	if res.StatusCode == http.StatusOK && checkExpired(res) {
-		status := m.deleteObject(ctx, res.Header.Get("x-goog-generation"))
-		return status == http.StatusOK || status == http.StatusNoContent || status == http.StatusNotFound
-	}
-	return false
+	return status == http.StatusTooManyRequests ||
+		status == http.StatusRequestTimeout ||
+		status == http.StatusInternalServerError ||
+		status == http.StatusServiceUnavailable ||
+		status == http.StatusBadGateway ||
+		status == http.StatusGatewayTimeout
 }
 
-func checkExpired(res *http.Response) bool {
+func expired(res *http.Response) bool {
 	// Check for expiration using server date.
-	ttl, err := strconv.ParseInt(res.Header.Get("x-goog-meta-ttl"), 10, 64)
-	if err != nil || ttl <= 0 {
-		return false
-	}
 	now, err := http.ParseTime(res.Header.Get("Date"))
 	if err != nil {
 		return false
 	}
-	modifed, err := http.ParseTime(res.Header.Get("Last-Modified"))
+	modified, err := http.ParseTime(res.Header.Get("Last-Modified"))
 	if err != nil {
 		return false
 	}
-	expires := modifed.Add(time.Duration(ttl) * time.Second)
+	ttl, err := strconv.ParseInt(res.Header.Get("x-goog-meta-ttl"), 10, 64)
+	if err != nil || ttl <= 0 {
+		return false
+	}
+	expires := modified.Add(time.Duration(ttl) * time.Second)
 	return expires.Before(now)
 }

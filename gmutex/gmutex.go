@@ -177,8 +177,8 @@ func (m *Mutex) TryLockData(ctx context.Context, data io.Reader) (bool, error) {
 }
 
 // Unlock unlocks m, deleting any attached data.
-// Returns an error if the lock had already expired, and mutual
-// exclusion was not ensured.
+// Returns an error if the lock had already expired,
+// and mutual exclusion was not ensured.
 func (m *Mutex) Unlock(ctx context.Context) error {
 	if m.gen == "" {
 		panic("gmutex: unlock of unlocked mutex")
@@ -216,8 +216,8 @@ func (m *Mutex) Unlock(ctx context.Context) error {
 }
 
 // Update updates attached data, extending the expiration time of m.
-// Returns an error if the lock has already expired, and mutual
-// exclusion can not be ensured.
+// Returns an error if the lock has already expired,
+// and mutual exclusion can not be ensured.
 func (m *Mutex) Update(ctx context.Context, data io.Reader) error {
 	if m.gen == "" {
 		panic("gmutex: update of unlocked mutex")
@@ -283,6 +283,40 @@ func (m *Mutex) Inspect(ctx context.Context, data io.Writer) (bool, error) {
 		}
 		return false, fmt.Errorf("inspect mutex: http status %d: %s", status, http.StatusText(status))
 	}
+}
+
+// Abandon abandons m, returning a lock id that can be used to call Adopt.
+func (m *Mutex) Abandon() string {
+	if m.gen == "" {
+		panic("gmutex: abandon of unlocked mutex")
+	}
+
+	gen := m.gen
+	m.gen = ""
+	return gen
+}
+
+// Adopt adopts a lock into m, extending the expiration time of m.
+// Returns an error if the lock has already expired,
+// and mutual exclusion can not be ensured.
+func (m *Mutex) Adopt(ctx context.Context, id string) error {
+	return m.AdoptData(ctx, id, nil)
+}
+
+// AdoptData adopts a lock into m, updating attached data,
+// and extending the expiration time of m.
+// Returns an error if the lock has already expired,
+// and mutual exclusion can not be ensured.
+func (m *Mutex) AdoptData(ctx context.Context, id string, data io.Reader) error {
+	if m.gen != "" {
+		panic("gmutex: adopt on locked mutex")
+	}
+	if id == "" || id == "0" {
+		panic("gmutex: adopt of invalid lock")
+	}
+
+	m.gen = id
+	return m.Update(ctx, data)
 }
 
 func (m *Mutex) createObject(ctx context.Context, generation string, data io.Reader) (int, string, error) {

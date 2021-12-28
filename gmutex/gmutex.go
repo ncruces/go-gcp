@@ -215,16 +215,6 @@ func (m *Mutex) Unlock(ctx context.Context) error {
 	}
 }
 
-// Extend extends the expiration time of m.
-// Returns an error if the lock has already expired,
-// and mutual exclusion can not be ensured.
-func (m *Mutex) Extend(ctx context.Context) error {
-	if m.gen == "" {
-		panic("gmutex: extend of unlocked mutex")
-	}
-	return m.Update(ctx, nil)
-}
-
 // Update updates attached data, extending the expiration time of m.
 // Returns an error if the lock has already expired,
 // and mutual exclusion can not be ensured.
@@ -306,18 +296,9 @@ func (m *Mutex) Abandon() string {
 	return gen
 }
 
-// Adopt adopts a lock into m, extending the expiration time of m.
-// Returns an error if the lock has already expired,
-// and mutual exclusion can not be ensured.
-func (m *Mutex) Adopt(ctx context.Context, id string) error {
-	return m.AdoptData(ctx, id, nil)
-}
-
-// AdoptData adopts a lock into m, updating attached data,
-// and extending the expiration time of m.
-// Returns an error if the lock has already expired,
-// and mutual exclusion can not be ensured.
-func (m *Mutex) AdoptData(ctx context.Context, id string, data io.Reader) error {
+// Adopt adopts an abandoned lock into m,
+// and calls Update to ensure mutual exclusion.
+func (m *Mutex) Adopt(ctx context.Context, id string, data io.Reader) error {
 	if m.gen != "" {
 		panic("gmutex: adopt on locked mutex")
 	}

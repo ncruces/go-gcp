@@ -1,6 +1,7 @@
 package gmutex
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -19,6 +21,8 @@ import (
 // A Mutex can optionally have data attached to it while it is held.
 // While there is no limit to the size of this data,
 // it is best kept small.
+// Provided data must be of type *bytes.Buffer, *bytes.Reader,
+// or *strings.Reader.
 //
 // Given the latency and scalability properties of Google Cloud Storage,
 // a Mutex is best used to serialize long-running, high-latency
@@ -97,6 +101,9 @@ func (m *Mutex) LockData(ctx context.Context, data io.Reader) error {
 	if m.gen != "" {
 		panic("gmutex: lock of locked mutex")
 	}
+	if !rewindable(data) {
+		panic("gmutex: data not rewindable")
+	}
 
 	var backoff expBackOff // Exponential backoff because we don't hold the lock.
 	generation := ""       // Empty generation because we expect the lock not to exist.
@@ -149,6 +156,9 @@ func (m *Mutex) TryLock(ctx context.Context) (bool, error) {
 func (m *Mutex) TryLockData(ctx context.Context, data io.Reader) (bool, error) {
 	if m.gen != "" {
 		panic("gmutex: lock of locked mutex")
+	}
+	if !rewindable(data) {
+		panic("gmutex: data not rewindable")
 	}
 
 	var backoff expBackOff // Exponential backoff because we don't hold the lock.
@@ -238,6 +248,9 @@ func (m *Mutex) Unlock(ctx context.Context) error {
 func (m *Mutex) Update(ctx context.Context, data io.Reader) error {
 	if m.gen == "" {
 		panic("gmutex: update of unlocked mutex")
+	}
+	if !rewindable(data) {
+		panic("gmutex: data not rewindable")
 	}
 
 	var backoff linBackOff // Linear backoff because we hold the lock.
@@ -406,6 +419,15 @@ func retriable(status int, err error) bool {
 		status == http.StatusServiceUnavailable ||
 		status == http.StatusBadGateway ||
 		status == http.StatusGatewayTimeout
+}
+
+func rewindable(body io.Reader) bool {
+	switch body.(type) {
+	case nil, *bytes.Buffer, *bytes.Reader, *strings.Reader:
+		return true
+	default:
+		return body == http.NoBody
+	}
 }
 
 func expired(res *http.Response) bool {

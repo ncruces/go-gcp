@@ -7,7 +7,7 @@ type locker struct {
 }
 
 func (m locker) Lock() {
-	if err := m.Mutex.Lock(context.Background()); err != nil {
+	if err := m.Mutex.LockData(context.Background(), nil); err != nil {
 		panic(err)
 	}
 }

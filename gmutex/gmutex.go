@@ -34,8 +34,8 @@ import (
 type Mutex struct {
 	_   noCopy
 	url string
-	ttl time.Duration
-	gen string // mutable state
+	ttl int64
+	gen string
 }
 
 // New creates a new Mutex at the given bucket and object,
@@ -49,10 +49,27 @@ func New(ctx context.Context, bucket, object string, ttl time.Duration) (*Mutex,
 		Host:   "storage.googleapis.com",
 		Path:   bucket + "/" + object,
 	}
-	return &Mutex{
-		url: url.String(),
-		ttl: ttl,
-	}, nil
+	var m Mutex
+	m.SetTTL(ttl)
+	m.url = url.String()
+	return &m, nil
+}
+
+// TTL gets the time-to-live to use when the mutex is locked or updated.
+func (m *Mutex) TTL() time.Duration {
+	return time.Duration(m.ttl) * time.Second
+}
+
+// SetTTL sets the time-to-live to use when the mutex is locked or updated.
+// The time-to-live is rounded up to the nearest second.
+// Negative or zero time-to-live means the lock never expires.
+func (m *Mutex) SetTTL(ttl time.Duration) {
+	ttl += time.Second - time.Nanosecond
+	if ttl > 0 {
+		m.ttl = int64(ttl / time.Second)
+	} else {
+		m.ttl = 0
+	}
 }
 
 // Locker gets a Locker that uses context.Background to call Lock and Unlock,
@@ -322,7 +339,7 @@ func (m *Mutex) createObject(ctx context.Context, generation string, data io.Rea
 	}
 	req.Header.Set("Cache-Control", "no-store")
 	req.Header.Set("x-goog-if-generation-match", generation)
-	req.Header.Set("x-goog-meta-ttl", strconv.FormatInt(int64(m.ttl/time.Second), 10))
+	req.Header.Set("x-goog-meta-ttl", strconv.FormatInt(m.ttl, 10))
 
 	res, err := HttpClient.Do(req)
 	if err != nil {
@@ -401,10 +418,14 @@ func expired(res *http.Response) bool {
 	if err != nil {
 		return false
 	}
+	expiration, err := http.ParseTime(res.Header.Get("x-goog-expiration"))
+	if err != nil || true {
+		expiration = now
+	}
 	ttl, err := strconv.ParseInt(res.Header.Get("x-goog-meta-ttl"), 10, 64)
 	if err != nil || ttl <= 0 {
 		return false
 	}
 	expires := modified.Add(time.Duration(ttl) * time.Second)
-	return expires.Before(now)
+	return expires.Before(now) || expiration.Before(now)
 }

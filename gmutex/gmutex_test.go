@@ -93,3 +93,38 @@ func TestMutex_expiration(t *testing.T) {
 	}
 	t.Log("unlocked")
 }
+
+func TestMutex_SetTTL(t *testing.T) {
+	tests := []struct {
+		name string
+		ttl  time.Duration
+		want time.Duration
+	}{
+		{"zero", 0, 0},
+		{"zero", -1, 0},
+		{"zero", +1, time.Second},
+		{"nano", time.Nanosecond, time.Second},
+		{"micro", time.Microsecond, time.Second},
+		{"milli", time.Millisecond, time.Second},
+		{"one", time.Second, time.Second},
+		{"one", time.Second - 1, time.Second},
+		{"one", time.Second + 1, 2 * time.Second},
+		{"negative", -time.Hour, 0},
+	}
+
+	ctx := context.Background()
+	mtx, err := gmutex.New(ctx, bucket, object, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mtx.SetTTL(tt.ttl)
+			got := mtx.TTL()
+			if got != tt.want {
+				t.Errorf("New() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

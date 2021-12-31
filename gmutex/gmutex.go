@@ -116,6 +116,10 @@ func (m *Mutex) LockData(ctx context.Context, data io.Reader) error {
 			m.gen = gen
 			return nil
 		}
+		if status == http.StatusNotFound {
+			// Bucket does not exist.
+			return errors.New("lock mutex: bucket does not exist")
+		}
 
 		// If the lock object exists at another generation, let's inspect it.
 		if status == http.StatusPreconditionFailed {
@@ -171,6 +175,10 @@ func (m *Mutex) TryLockData(ctx context.Context, data io.Reader) (bool, error) {
 			// Lock acquired.
 			m.gen = gen
 			return true, nil
+		}
+		if status == http.StatusNotFound {
+			// Bucket does not exist.
+			return false, errors.New("lock mutex: bucket does not exist")
 		}
 
 		// If the lock object exists at another generation, let's inspect it.
@@ -263,6 +271,10 @@ func (m *Mutex) Update(ctx context.Context, data io.Reader) error {
 			m.gen = gen
 			return nil
 		}
+		if status == http.StatusNotFound {
+			// Bucket does not exist.
+			return errors.New("lock mutex: bucket does not exist")
+		}
 
 		// If the lock object exists at another generation, or no longer exists, it is stale.
 		if status == http.StatusPreconditionFailed || status == http.StatusNotFound {
@@ -346,7 +358,7 @@ func (m *Mutex) createObject(ctx context.Context, generation string, data io.Rea
 	}
 
 	// Create/update the lock object if the generation matches.
-	req, err := http.NewRequestWithContext(ctx, "PUT", m.url, data)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, m.url, data)
 	if err != nil {
 		panic(err)
 	}
@@ -364,7 +376,7 @@ func (m *Mutex) createObject(ctx context.Context, generation string, data io.Rea
 
 func (m *Mutex) deleteObject(ctx context.Context, generation string) (int, error) {
 	// Delete the lock object if the generation matches.
-	req, err := http.NewRequestWithContext(ctx, "DELETE", m.url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, m.url, nil)
 	if err != nil {
 		panic(err)
 	}
@@ -381,7 +393,7 @@ func (m *Mutex) deleteObject(ctx context.Context, generation string) (int, error
 func (m *Mutex) inspectObject(ctx context.Context, data io.Writer) (int, string, error) {
 	var method string
 	if data == nil {
-		method = "HEAD"
+		method = http.MethodHead
 	}
 
 	// Get the lock object's status.

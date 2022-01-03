@@ -2,11 +2,13 @@
 package gtrace
 
 import (
+	"net/http"
 	"runtime"
 	"sync"
 
 	"contrib.go.opencensus.io/exporter/stackdriver"
 	"contrib.go.opencensus.io/exporter/stackdriver/propagation"
+	"go.opencensus.io/plugin/ochttp"
 	"go.opencensus.io/trace"
 
 	"github.com/ncruces/go-gcp/glog"
@@ -39,4 +41,30 @@ func Init() (err error) {
 // HTTP headers for Cloud Trace.
 type HTTPFormat struct {
 	propagation.HTTPFormat
+}
+
+// NewHTTPClient returns a tracing http.Client.
+func NewHTTPClient() *http.Client {
+	return &http.Client{
+		Transport: &ochttp.Transport{
+			// Use Google Cloud propagation format.
+			Propagation: &propagation.HTTPFormat{},
+		},
+	}
+}
+
+// NewHTTPTransport returns a tracing http.RoundTripper.
+func NewHTTPTransport() http.RoundTripper {
+	return &ochttp.Transport{
+		// Use Google Cloud propagation format.
+		Propagation: &propagation.HTTPFormat{},
+	}
+}
+
+// NewHTTPHandler returns a tracing http.Handler.
+func NewHTTPHandler() http.Handler {
+	return &ochttp.Handler{
+		// Use the Google Cloud propagation format.
+		Propagation: &propagation.HTTPFormat{},
+	}
 }

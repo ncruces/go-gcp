@@ -15,7 +15,7 @@ var bucket = os.Getenv("BUCKET")
 var object = os.Getenv("OBJECT")
 
 func TestMain(m *testing.M) {
-	gmutex.HttpClient = http.DefaultClient
+	gmutex.HTTPClient = http.DefaultClient
 	os.Exit(m.Run())
 }
 

@@ -366,7 +366,7 @@ func (m *Mutex) createObject(ctx context.Context, generation string, data io.Rea
 	req.Header.Set("x-goog-if-generation-match", generation)
 	req.Header.Set("x-goog-meta-ttl", strconv.FormatInt(m.ttl, 10))
 
-	res, err := HttpClient.Do(req)
+	res, err := HTTPClient.Do(req)
 	if err != nil {
 		return 0, "", err
 	}
@@ -382,7 +382,7 @@ func (m *Mutex) deleteObject(ctx context.Context, generation string) (int, error
 	}
 	req.Header.Set("x-goog-if-generation-match", generation)
 
-	res, err := HttpClient.Do(req)
+	res, err := HTTPClient.Do(req)
 	if err != nil {
 		return 0, err
 	}
@@ -403,7 +403,7 @@ func (m *Mutex) inspectObject(ctx context.Context, data io.Writer) (int, string,
 	}
 	req.Header.Set("Cache-Control", "no-cache")
 
-	res, err := HttpClient.Do(req)
+	res, err := HTTPClient.Do(req)
 	if err != nil {
 		return 0, "", err
 	}

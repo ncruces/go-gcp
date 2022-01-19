@@ -2,6 +2,10 @@ package glog_test
 
 import "github.com/ncruces/go-gcp/glog"
 
+func init() {
+	glog.NoSourceLocation = true
+}
+
 func ExamplePrint() {
 	glog.Print("Test")
 	// Output:

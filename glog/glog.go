@@ -7,13 +7,19 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"runtime"
+	"strconv"
 	"strings"
 )
 
-var std Logger
+var std Logger = Logger{caller: 1}
 
 // ProjectID should be set to the Google Cloud project ID.
 var ProjectID string = os.Getenv("GOOGLE_CLOUD_PROJECT")
+
+// NoSourceLocation should be set to true to avoid associating
+// source code location information with the entry.
+var NoSourceLocation bool
 
 // Print logs an entry with no assigned severity level.
 // Arguments are handled in the manner of fmt.Print.
@@ -232,8 +238,10 @@ func Emergencyj(msg string, v interface{}) {
 }
 
 type Logger struct {
-	trace  string
-	spanID string
+	caller  int
+	trace   string
+	spanID  string
+	request *httpRequest
 }
 
 func ForRequest(r *http.Request) (l Logger) {
@@ -242,8 +250,21 @@ func ForRequest(r *http.Request) (l Logger) {
 		if i := strings.IndexByte(h, '/'); i > 0 {
 			if t := h[:i]; strings.Count(t, "0") != len(t) {
 				l.trace = fmt.Sprintf("projects/%s/traces/%s", ProjectID, t)
+				if j := strings.IndexByte(h[i+1:], ';'); j > 0 {
+					if s, _ := strconv.ParseUint(h[i+1:i+j+1], 10, 64); s > 0 {
+						l.spanID = fmt.Sprintf("%016x", s)
+					}
+				}
 			}
 		}
+	}
+	l.request = &httpRequest{
+		RequestMethod: r.Method,
+		RequestUrl:    r.URL.String(),
+		UserAgent:     r.UserAgent(),
+		RemoteIp:      r.RemoteAddr,
+		Referer:       r.Referer(),
+		Protocol:      r.Proto,
 	}
 	return l
 }
@@ -520,7 +541,14 @@ func logf(s severity, l Logger, format string, v ...interface{}) {
 }
 
 func logs(s severity, l Logger, msg string) {
-	entry := entry{msg, s.String(), l.trace}
+	entry := entry{
+		Message:        msg,
+		Severity:       s.String(),
+		Trace:          l.trace,
+		SpanID:         l.spanID,
+		HttpRequest:    l.request,
+		SourceLocation: location(4),
+	}
 	json.NewEncoder(s.File()).Encode(entry)
 }
 
@@ -541,6 +569,15 @@ func logj(s severity, l Logger, msg string, j interface{}) {
 	if v := l.trace; v != "" {
 		entry["logging.googleapis.com/trace"], _ = json.Marshal(v)
 	}
+	if v := l.spanID; v != "" {
+		entry["logging.googleapis.com/spanId"], _ = json.Marshal(v)
+	}
+	if v := l.request; v != nil {
+		entry["httpRequest"], _ = json.Marshal(v)
+	}
+	if v := location(3); v != nil {
+		entry["logging.googleapis.com/sourceLocation"], _ = json.Marshal(v)
+	}
 
 	json.NewEncoder(s.File()).Encode(entry)
 }
@@ -549,4 +586,40 @@ type entry struct {
 	Message  string `json:"message"`
 	Severity string `json:"severity,omitempty"`
 	Trace    string `json:"logging.googleapis.com/trace,omitempty"`
+	SpanID   string `json:"logging.googleapis.com/spanId,omitempty"`
+
+	HttpRequest    *httpRequest    `json:"httpRequest,omitempty"`
+	SourceLocation *sourceLocation `json:"logging.googleapis.com/sourceLocation,omitempty"`
+}
+
+type httpRequest struct {
+	RequestMethod string `json:"requestMethod,omitempty"`
+	RequestUrl    string `json:"requestUrl,omitempty"`
+	UserAgent     string `json:"userAgent,omitempty"`
+	RemoteIp      string `json:"remoteIp,omitempty"`
+	Referer       string `json:"referer,omitempty"`
+	Protocol      string `json:"protocol,omitempty"`
+}
+
+type sourceLocation struct {
+	File     string `json:"file,omitempty"`
+	Line     string `json:"line,omitempty"`
+	Function string `json:"function,omitempty"`
+}
+
+func location(skip int) *sourceLocation {
+	if NoSourceLocation {
+		return nil
+	}
+	if pc, file, line, ok := runtime.Caller(skip); ok {
+		loc := &sourceLocation{
+			File: file,
+			Line: strconv.Itoa(line),
+		}
+		if f := runtime.FuncForPC(pc); f != nil {
+			loc.Function = f.Name()
+		}
+		return loc
+	}
+	return nil
 }

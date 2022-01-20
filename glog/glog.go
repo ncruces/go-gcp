@@ -3,23 +3,24 @@
 package glog
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
-	"runtime"
-	"strconv"
-	"strings"
+
+	"cloud.google.com/go/functions/metadata"
+	"go.opencensus.io/trace"
 )
 
-var std Logger = Logger{caller: 1}
+var std Logger = Logger{callers: 1}
 
 // ProjectID should be set to the Google Cloud project ID.
 var ProjectID string = os.Getenv("GOOGLE_CLOUD_PROJECT")
 
-// NoSourceLocation should be set to true to avoid associating
+// LogSourceLocation should be set to false to avoid associating
 // source code location information with the entry.
-var NoSourceLocation bool
+var LogSourceLocation bool = true
 
 // Print logs an entry with no assigned severity level.
 // Arguments are handled in the manner of fmt.Print.
@@ -237,30 +238,33 @@ func Emergencyj(msg string, v interface{}) {
 	std.Emergencyj(msg, v)
 }
 
+// A Logger that logs entries with additional context.
 type Logger struct {
-	caller  int
-	trace   string
-	spanID  string
-	request *httpRequest
+	trace       string
+	spanID      string
+	executionID string
+	request     *httpRequest
+	callers     int
 }
 
-func ForRequest(r *http.Request) (l Logger) {
-	if ProjectID != "" {
-		h := r.Header.Get("X-Cloud-Trace-Context")
-		if i := strings.IndexByte(h, '/'); i > 0 {
-			if t := h[:i]; strings.Count(t, "0") != len(t) {
-				l.trace = fmt.Sprintf("projects/%s/traces/%s", ProjectID, t)
-				if j := strings.IndexByte(h[i+1:], ';'); j > 0 {
-					if s, _ := strconv.ParseUint(h[i+1:i+j+1], 10, 64); s > 0 {
-						l.spanID = fmt.Sprintf("%016x", s)
-					}
-				}
-			}
-		}
+// ForContext creates a Logger with metadata from a context.Context.
+func ForContext(ctx context.Context) (l Logger) {
+	if span := trace.FromContext(ctx); span != nil {
+		l.trace, l.spanID = fromSpanContext(span.SpanContext())
 	}
+	if meta, _ := metadata.FromContext(ctx); meta != nil {
+		l.executionID = meta.EventID
+	}
+	return l
+}
+
+// ForRequest creates a Logger with metadata from an http.Request.
+func ForRequest(r *http.Request) (l Logger) {
+	l.trace, l.spanID = parseTraceContext(r.Header.Get("X-Cloud-Trace-Context"))
+	l.executionID = r.Header.Get("Function-Execution-Id")
 	l.request = &httpRequest{
 		RequestMethod: r.Method,
-		RequestUrl:    r.URL.String(),
+		RequestUrl:    r.RequestURI,
 		UserAgent:     r.UserAgent(),
 		RemoteIp:      r.RemoteAddr,
 		Referer:       r.Referer(),
@@ -547,7 +551,8 @@ func logs(s severity, l Logger, msg string) {
 		Trace:          l.trace,
 		SpanID:         l.spanID,
 		HttpRequest:    l.request,
-		SourceLocation: location(4),
+		SourceLocation: location(4 + l.callers),
+		Labels:         executionLabels(l.executionID),
 	}
 	json.NewEncoder(s.File()).Encode(entry)
 }
@@ -563,8 +568,8 @@ func logj(s severity, l Logger, msg string, j interface{}) {
 	if v := msg; v != "" {
 		entry["message"], _ = json.Marshal(v)
 	}
-	if v := s.String(); v != "" {
-		entry["severity"], _ = json.Marshal(v)
+	if v := s; v != 0 {
+		entry["severity"], _ = json.Marshal(v.String())
 	}
 	if v := l.trace; v != "" {
 		entry["logging.googleapis.com/trace"], _ = json.Marshal(v)
@@ -575,7 +580,10 @@ func logj(s severity, l Logger, msg string, j interface{}) {
 	if v := l.request; v != nil {
 		entry["httpRequest"], _ = json.Marshal(v)
 	}
-	if v := location(3); v != nil {
+	if v := l.executionID; v != "" {
+		entry["labels"], _ = json.Marshal(executionLabels(l.executionID))
+	}
+	if v := location(3 + l.callers); v != nil {
 		entry["logging.googleapis.com/sourceLocation"], _ = json.Marshal(v)
 	}
 
@@ -590,6 +598,7 @@ type entry struct {
 
 	HttpRequest    *httpRequest    `json:"httpRequest,omitempty"`
 	SourceLocation *sourceLocation `json:"logging.googleapis.com/sourceLocation,omitempty"`
+	Labels         executionLabels `json:"logging.googleapis.com/labels,omitempty"`
 }
 
 type httpRequest struct {
@@ -601,25 +610,18 @@ type httpRequest struct {
 	Protocol      string `json:"protocol,omitempty"`
 }
 
+type executionLabels string
+
+func (e executionLabels) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		ExecutionID string `json:"execution_id"`
+	}{
+		string(e),
+	})
+}
+
 type sourceLocation struct {
 	File     string `json:"file,omitempty"`
 	Line     string `json:"line,omitempty"`
 	Function string `json:"function,omitempty"`
-}
-
-func location(skip int) *sourceLocation {
-	if NoSourceLocation {
-		return nil
-	}
-	if pc, file, line, ok := runtime.Caller(skip); ok {
-		loc := &sourceLocation{
-			File: file,
-			Line: strconv.Itoa(line),
-		}
-		if f := runtime.FuncForPC(pc); f != nil {
-			loc.Function = f.Name()
-		}
-		return loc
-	}
-	return nil
 }

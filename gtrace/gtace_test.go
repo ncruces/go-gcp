@@ -6,7 +6,6 @@ import (
 
 	"github.com/ncruces/go-gcp/glog"
 	"github.com/ncruces/go-gcp/gtrace"
-	"go.opencensus.io/plugin/ochttp"
 )
 
 func Example() {
@@ -20,7 +19,5 @@ func Example() {
 
 	http.HandleFunc("/", http.NotFound)
 
-	glog.Critical(http.ListenAndServe(":"+port, &ochttp.Handler{
-		Propagation: &gtrace.HTTPFormat{},
-	}))
+	glog.Critical(http.ListenAndServe(":"+port, gtrace.NewHTTPHandler()))
 }

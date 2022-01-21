@@ -155,8 +155,9 @@ func (m *Mutex) TryLock(ctx context.Context) (bool, error) {
 
 // TryLockData tries to lock m with attached data.
 // Returns true if the lock was taken successfully
-// (and the attached data stored),
-// false if the lock is already in use.
+// (and the attached data stored).
+// Returns false if the lock is already in use,
+// fetching attached data if data satisfies io.Writer.
 func (m *Mutex) TryLockData(ctx context.Context, data io.Reader) (bool, error) {
 	if m.gen != "" {
 		panic("gmutex: lock of locked mutex")
@@ -165,6 +166,7 @@ func (m *Mutex) TryLockData(ctx context.Context, data io.Reader) (bool, error) {
 		panic("gmutex: data not rewindable")
 	}
 
+	buffer, _ := data.(*bytes.Buffer)
 	var backoff expBackOff // Exponential backoff because we don't hold the lock.
 	generation := ""       // Empty generation because we expect the lock not to exist.
 
@@ -183,14 +185,14 @@ func (m *Mutex) TryLockData(ctx context.Context, data io.Reader) (bool, error) {
 
 		// If the lock object exists at another generation, let's inspect it.
 		if status == http.StatusPreconditionFailed {
-			status, gen, err = m.inspectObject(ctx, nil)
+			status, gen, err = m.inspectObject(ctx, buffer)
 		}
 		// For transient errors, backoff and retry.
 		for retriable(status, err) {
 			if err := backoff.wait(ctx); err != nil {
 				return false, err
 			}
-			status, gen, err = m.inspectObject(ctx, nil)
+			status, gen, err = m.inspectObject(ctx, buffer)
 		}
 		// If the lock object no longer exists, or has expired, we can acquire it.
 		if status == http.StatusNotFound {
@@ -414,6 +416,12 @@ func (m *Mutex) inspectObject(ctx context.Context, data io.Writer) (int, string,
 		res.StatusCode = http.StatusNotFound
 	}
 	if res.StatusCode == http.StatusOK && data != nil {
+		switch b := data.(type) {
+		case *strings.Builder:
+			b.Reset()
+		case *bytes.Buffer:
+			b.Reset()
+		}
 		_, err = io.Copy(data, res.Body)
 	}
 	return res.StatusCode, res.Header.Get("x-goog-generation"), nil

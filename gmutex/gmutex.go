@@ -252,10 +252,10 @@ func (m *Mutex) Unlock(ctx context.Context) error {
 	}
 }
 
-// Update updates attached data, extending the expiration time of m.
+// UpdateData updates attached data, extending the expiration time of m.
 // Returns an error if the lock has already expired,
 // and mutual exclusion can not be ensured.
-func (m *Mutex) Update(ctx context.Context, data io.Reader) error {
+func (m *Mutex) UpdateData(ctx context.Context, data io.Reader) error {
 	if m.gen == "" {
 		panic("gmutex: update of unlocked mutex")
 	}
@@ -299,8 +299,8 @@ func (m *Mutex) Update(ctx context.Context, data io.Reader) error {
 	}
 }
 
-// Inspect inspects m, returning its locked state and fetching attached data.
-func (m *Mutex) Inspect(ctx context.Context, data io.Writer) (bool, error) {
+// InspectData inspects m, returning its locked state and fetching attached data.
+func (m *Mutex) InspectData(ctx context.Context, data io.Writer) (bool, error) {
 	var backoff expBackOff // Exponential backoff because we don't hold the lock.
 
 	for {
@@ -340,9 +340,9 @@ func (m *Mutex) Abandon() string {
 	return gen
 }
 
-// Adopt adopts an abandoned lock into m,
-// and calls Update to ensure mutual exclusion.
-func (m *Mutex) Adopt(ctx context.Context, id string, data io.Reader) error {
+// AdoptData adopts an abandoned lock into m,
+// and calls UpdateData to ensure mutual exclusion.
+func (m *Mutex) AdoptData(ctx context.Context, id string, data io.Reader) error {
 	if m.gen != "" {
 		panic("gmutex: adopt on locked mutex")
 	}
@@ -351,7 +351,7 @@ func (m *Mutex) Adopt(ctx context.Context, id string, data io.Reader) error {
 	}
 
 	m.gen = id
-	return m.Update(ctx, data)
+	return m.UpdateData(ctx, data)
 }
 
 func (m *Mutex) createObject(ctx context.Context, generation string, data io.Reader) (int, string, error) {

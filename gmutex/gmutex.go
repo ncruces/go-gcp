@@ -166,7 +166,7 @@ func (m *Mutex) TryLockData(ctx context.Context, data io.Reader) (bool, error) {
 		panic("gmutex: data not rewindable")
 	}
 
-	buffer, _ := data.(*bytes.Buffer)
+	buffer, _ := data.(io.Writer)
 	var backoff expBackOff // Exponential backoff because we don't hold the lock.
 	generation := ""       // Empty generation because we expect the lock not to exist.
 

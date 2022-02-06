@@ -105,24 +105,23 @@ func (m *Mutex) LockData(ctx context.Context, data io.Reader) error {
 		panic("gmutex: data not rewindable")
 	}
 
+	generation := ""       // Initially, we expect the lock not to exist.
 	var backoff expBackOff // Exponential backoff because we don't hold the lock.
-	generation := ""       // Empty generation because we expect the lock not to exist.
 
 	for {
 		// Create the lock object, at the expected generation.
 		status, gen, err := m.createObject(ctx, generation, data)
 		if status == http.StatusOK {
-			// Lock acquired.
+			// Acquired.
 			m.gen = gen
 			return nil
 		}
 		if status == http.StatusNotFound {
-			// Bucket does not exist.
 			return errors.New("lock mutex: bucket does not exist")
 		}
 
-		// If the lock object exists at another generation, let's inspect it.
 		if status == http.StatusPreconditionFailed {
+			// The lock object exists at another generation, inspect it.
 			status, gen, err = m.inspectObject(ctx, nil)
 		}
 		// While the lock object exists, and for transient errors, backoff and retry.
@@ -132,8 +131,8 @@ func (m *Mutex) LockData(ctx context.Context, data io.Reader) error {
 			}
 			status, gen, err = m.inspectObject(ctx, nil)
 		}
-		// If the lock object no longer exists, or has expired, we can acquire it.
 		if status == http.StatusNotFound {
+			// The lock object no longer exists, or has expired, acquire it.
 			generation = gen
 			continue
 		}
@@ -168,41 +167,37 @@ func (m *Mutex) TryLockData(ctx context.Context, data io.Reader) (bool, error) {
 
 	buffer, _ := data.(io.Writer)
 	var backoff expBackOff // Exponential backoff because we don't hold the lock.
-	generation := ""       // Empty generation because we expect the lock not to exist.
 
 	for {
-		// Create the lock object, at the expected generation.
-		status, gen, err := m.createObject(ctx, generation, data)
+		// Inspect the lock object.
+		status, gen, err := m.inspectObject(ctx, buffer)
 		if status == http.StatusOK {
-			// Lock acquired.
-			m.gen = gen
-			return true, nil
-		}
-		if status == http.StatusNotFound {
-			// Bucket does not exist.
-			return false, errors.New("lock mutex: bucket does not exist")
+			return false, nil
 		}
 
-		// If the lock object exists at another generation, let's inspect it.
-		if status == http.StatusPreconditionFailed {
-			status, gen, err = m.inspectObject(ctx, buffer)
+		if status == http.StatusNotFound {
+			// The lock object doesn't exist, or has expired, acquire it.
+			status, gen, err = m.createObject(ctx, gen, data)
+			if status == http.StatusOK {
+				// Acquired.
+				m.gen = gen
+				return true, nil
+			}
+			if status == http.StatusNotFound {
+				return false, errors.New("lock mutex: bucket does not exist")
+			}
+			if status == http.StatusPreconditionFailed {
+				// The lock object was recreated at another generation, inspect it.
+				continue
+			}
 		}
+
 		// For transient errors, backoff and retry.
-		for retriable(status, err) {
+		if retriable(status, err) {
 			if err := backoff.wait(ctx); err != nil {
 				return false, err
 			}
-			status, gen, err = m.inspectObject(ctx, buffer)
-		}
-		// If the lock object no longer exists, or has expired, we can acquire it.
-		if status == http.StatusNotFound {
-			generation = gen
 			continue
-		}
-		// If the lock object exists.
-		if status == http.StatusOK {
-			// Lock held, give up.
-			return false, nil
 		}
 
 		// Can't recover, give up.
@@ -231,8 +226,8 @@ func (m *Mutex) Unlock(ctx context.Context) error {
 			return nil
 		}
 
-		// If the lock object exists at another generation, or no longer exists, it is stale.
 		if status == http.StatusPreconditionFailed || status == http.StatusNotFound {
+			// The lock object exists at another generation, or no longer exists, it's stale.
 			return errors.New("unlock mutex: stale lock")
 		}
 
@@ -269,17 +264,16 @@ func (m *Mutex) UpdateData(ctx context.Context, data io.Reader) error {
 		// Update the lock object, at the expected generation.
 		status, gen, err := m.createObject(ctx, m.gen, data)
 		if status == http.StatusOK {
-			// Lock updated.
+			// Updated.
 			m.gen = gen
 			return nil
 		}
 		if status == http.StatusNotFound {
-			// Bucket does not exist.
 			return errors.New("lock mutex: bucket does not exist")
 		}
 
-		// If the lock object exists at another generation, or no longer exists, it is stale.
 		if status == http.StatusPreconditionFailed || status == http.StatusNotFound {
+			// The lock object exists at another generation, or no longer exists, it's stale.
 			return errors.New("update mutex: stale lock, abort")
 		}
 

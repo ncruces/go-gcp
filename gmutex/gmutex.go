@@ -3,6 +3,7 @@ package gmutex
 import (
 	"bytes"
 	"context"
+	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
@@ -36,10 +37,11 @@ import (
 // and then arrange for another goroutine to unlock it),
 // but it is not safe for concurrent use by multiple goroutines.
 type Mutex struct {
-	_   noCopy
-	url string
-	ttl int64
-	gen string
+	_          noCopy
+	bucket     string
+	object     string
+	generation string
+	ttl        int64
 }
 
 // New creates a new Mutex at the given bucket and object,
@@ -48,23 +50,22 @@ func New(ctx context.Context, bucket, object string, ttl time.Duration) (*Mutex,
 	if err := initClient(ctx); err != nil {
 		return nil, err
 	}
-	url := url.URL{
-		Scheme: "https",
-		Host:   "storage.googleapis.com",
-		Path:   bucket + "/" + object,
+	m := Mutex{
+		bucket: bucket,
+		object: object,
 	}
-	var m Mutex
 	m.SetTTL(ttl)
-	m.url = url.String()
 	return &m, nil
 }
 
-// TTL gets the time-to-live to use when the mutex is locked or updated.
+// TTL gets the time-to-live to use when the mutex is
+// locked, extended, or updated.
 func (m *Mutex) TTL() time.Duration {
 	return time.Duration(m.ttl) * time.Second
 }
 
-// SetTTL sets the time-to-live to use when the mutex is locked or updated.
+// SetTTL sets the time-to-live to use when the mutex is
+// locked, extended, or updated.
 // The time-to-live is rounded up to the nearest second.
 // Negative or zero time-to-live means the lock never expires.
 func (m *Mutex) SetTTL(ttl time.Duration) {
@@ -98,7 +99,7 @@ func (m *Mutex) Lock(ctx context.Context) error {
 // Returns nil if the lock was taken successfully
 // (and the attached data stored).
 func (m *Mutex) LockData(ctx context.Context, data io.Reader) error {
-	if m.gen != "" {
+	if m.generation != "" {
 		panic("gmutex: lock of locked mutex")
 	}
 	if !rewindable(data) {
@@ -113,7 +114,7 @@ func (m *Mutex) LockData(ctx context.Context, data io.Reader) error {
 		status, gen, err := m.createObject(ctx, generation, data)
 		if status == http.StatusOK {
 			// Acquired.
-			m.gen = gen
+			m.generation = gen
 			return nil
 		}
 		if status == http.StatusNotFound {
@@ -158,7 +159,7 @@ func (m *Mutex) TryLock(ctx context.Context) (bool, error) {
 // Returns false if the lock is already in use,
 // fetching attached data if data satisfies io.Writer.
 func (m *Mutex) TryLockData(ctx context.Context, data io.Reader) (bool, error) {
-	if m.gen != "" {
+	if m.generation != "" {
 		panic("gmutex: lock of locked mutex")
 	}
 	if !rewindable(data) {
@@ -180,7 +181,7 @@ func (m *Mutex) TryLockData(ctx context.Context, data io.Reader) (bool, error) {
 			status, gen, err = m.createObject(ctx, gen, data)
 			if status == http.StatusOK {
 				// Acquired.
-				m.gen = gen
+				m.generation = gen
 				return true, nil
 			}
 			if status == http.StatusNotFound {
@@ -212,7 +213,7 @@ func (m *Mutex) TryLockData(ctx context.Context, data io.Reader) (bool, error) {
 // Returns an error if the lock had already expired,
 // and mutual exclusion was not ensured.
 func (m *Mutex) Unlock(ctx context.Context) error {
-	if m.gen == "" {
+	if m.generation == "" {
 		panic("gmutex: unlock of unlocked mutex")
 	}
 
@@ -220,9 +221,9 @@ func (m *Mutex) Unlock(ctx context.Context) error {
 
 	for {
 		// Delete the lock object, at the expected generation.
-		status, err := m.deleteObject(ctx, m.gen)
+		status, err := m.deleteObject(ctx, m.generation)
 		if status == http.StatusOK || status == http.StatusNoContent {
-			m.gen = ""
+			m.generation = ""
 			return nil
 		}
 
@@ -247,11 +248,54 @@ func (m *Mutex) Unlock(ctx context.Context) error {
 	}
 }
 
+// Extend extends the expiration time of m, keeping any attached data.
+// Returns an error if the lock has already expired,
+// and mutual exclusion can not be ensured.
+func (m *Mutex) Extend(ctx context.Context) error {
+	if m.generation == "" {
+		panic("gmutex: extend of unlocked mutex")
+	}
+
+	var backoff linBackOff // Linear backoff because we hold the lock.
+
+	for {
+		// Extend the lock object, at the expected generation.
+		status, gen, err := m.extendObject(ctx, m.generation)
+		if status == http.StatusOK {
+			// Extended.
+			m.generation = gen
+			return nil
+		}
+		if status == http.StatusNotFound {
+			return errors.New("mutex: bucket does not exist")
+		}
+
+		if status == http.StatusPreconditionFailed || status == http.StatusNotFound {
+			// The lock object exists at another generation, or no longer exists, it's stale.
+			return errors.New("extend mutex: stale lock, abort")
+		}
+
+		// For transient errors, backoff and retry.
+		if retriable(status, err) {
+			if err := backoff.wait(ctx); err != nil {
+				return err
+			}
+			continue
+		}
+
+		// Can't recover, give up.
+		if err != nil {
+			return fmt.Errorf("extend mutex: %w", err)
+		}
+		return fmt.Errorf("extend mutex: http status %d: %s", status, http.StatusText(status))
+	}
+}
+
 // UpdateData updates attached data, extending the expiration time of m.
 // Returns an error if the lock has already expired,
 // and mutual exclusion can not be ensured.
 func (m *Mutex) UpdateData(ctx context.Context, data io.Reader) error {
-	if m.gen == "" {
+	if m.generation == "" {
 		panic("gmutex: update of unlocked mutex")
 	}
 	if !rewindable(data) {
@@ -262,10 +306,10 @@ func (m *Mutex) UpdateData(ctx context.Context, data io.Reader) error {
 
 	for {
 		// Update the lock object, at the expected generation.
-		status, gen, err := m.createObject(ctx, m.gen, data)
+		status, gen, err := m.createObject(ctx, m.generation, data)
 		if status == http.StatusOK {
 			// Updated.
-			m.gen = gen
+			m.generation = gen
 			return nil
 		}
 		if status == http.StatusNotFound {
@@ -325,26 +369,40 @@ func (m *Mutex) InspectData(ctx context.Context, data io.Writer) (bool, error) {
 
 // Abandon abandons m, returning a lock id that can be used to call Adopt.
 func (m *Mutex) Abandon() string {
-	if m.gen == "" {
+	if m.generation == "" {
 		panic("gmutex: abandon of unlocked mutex")
 	}
 
-	gen := m.gen
-	m.gen = ""
+	gen := m.generation
+	m.generation = ""
 	return gen
 }
 
-// AdoptData adopts an abandoned lock into m,
-// and calls UpdateData to ensure mutual exclusion.
-func (m *Mutex) AdoptData(ctx context.Context, id string, data io.Reader) error {
-	if m.gen != "" {
+// Adopt adopts an abandoned lock into m,
+// and calls Extend to ensure mutual exclusion.
+func (m *Mutex) Adopt(ctx context.Context, id string) error {
+	if m.generation != "" {
 		panic("gmutex: adopt on locked mutex")
 	}
 	if id == "" || id == "0" {
 		panic("gmutex: adopt of invalid lock")
 	}
 
-	m.gen = id
+	m.generation = id
+	return m.Extend(ctx)
+}
+
+// AdoptData adopts an abandoned lock into m,
+// and calls UpdateData to ensure mutual exclusion.
+func (m *Mutex) AdoptData(ctx context.Context, id string, data io.Reader) error {
+	if m.generation != "" {
+		panic("gmutex: adopt on locked mutex")
+	}
+	if id == "" || id == "0" {
+		panic("gmutex: adopt of invalid lock")
+	}
+
+	m.generation = id
 	return m.UpdateData(ctx, data)
 }
 
@@ -354,7 +412,30 @@ func (m *Mutex) createObject(ctx context.Context, generation string, data io.Rea
 	}
 
 	// Create/update the lock object if the generation matches.
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, m.url, data)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, m.url(), data)
+	if err != nil {
+		panic(err)
+	}
+	req.Header.Set("Cache-Control", "no-store")
+	req.Header.Set("x-goog-if-generation-match", generation)
+	req.Header.Set("x-goog-meta-ttl", strconv.FormatInt(m.ttl, 10))
+
+	res, err := HTTPClient.Do(req)
+	if err != nil {
+		return 0, "", err
+	}
+	res.Body.Close()
+	return res.StatusCode, res.Header.Get("x-goog-generation"), nil
+}
+
+func (m *Mutex) extendObject(ctx context.Context, generation string) (int, string, error) {
+	var buf bytes.Buffer
+	buf.WriteString("<ComposeRequest><Component><Name>")
+	xml.EscapeText(&buf, []byte(m.object))
+	buf.WriteString("</Name></Component></ComposeRequest>")
+
+	// Extend the lock object if the generation matches.
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, m.url()+"?compose", &buf)
 	if err != nil {
 		panic(err)
 	}
@@ -372,7 +453,7 @@ func (m *Mutex) createObject(ctx context.Context, generation string, data io.Rea
 
 func (m *Mutex) deleteObject(ctx context.Context, generation string) (int, error) {
 	// Delete the lock object if the generation matches.
-	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, m.url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, m.url(), nil)
 	if err != nil {
 		panic(err)
 	}
@@ -393,7 +474,7 @@ func (m *Mutex) inspectObject(ctx context.Context, data io.Writer) (int, string,
 	}
 
 	// Get the lock object's status.
-	req, err := http.NewRequestWithContext(ctx, method, m.url, nil)
+	req, err := http.NewRequestWithContext(ctx, method, m.url(), nil)
 	if err != nil {
 		panic(err)
 	}
@@ -419,6 +500,15 @@ func (m *Mutex) inspectObject(ctx context.Context, data io.Writer) (int, string,
 		_, err = io.Copy(data, res.Body)
 	}
 	return res.StatusCode, res.Header.Get("x-goog-generation"), nil
+}
+
+func (m *Mutex) url() string {
+	url := url.URL{
+		Scheme: "https",
+		Host:   "storage.googleapis.com",
+		Path:   m.bucket + "/" + m.object,
+	}
+	return url.String()
 }
 
 func retriable(status int, err error) bool {

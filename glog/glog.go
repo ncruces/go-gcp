@@ -521,6 +521,8 @@ func (s severity) String() string {
 		return "CRITICAL"
 	case alertsv:
 		return "ALERT"
+	case emergencysv:
+		return "EMERGENCY"
 	}
 }
 

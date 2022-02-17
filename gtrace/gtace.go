@@ -2,7 +2,9 @@
 package gtrace
 
 import (
+	"encoding/json"
 	"net/http"
+	"os"
 	"runtime"
 	"sync"
 
@@ -10,26 +12,32 @@ import (
 	"contrib.go.opencensus.io/exporter/stackdriver/propagation"
 	"go.opencensus.io/plugin/ochttp"
 	"go.opencensus.io/trace"
-
-	"github.com/ncruces/go-gcp/glog"
 )
 
 var once sync.Once
 
+// ProjectID should be set to the Google Cloud project ID.
+var ProjectID string = os.Getenv("GOOGLE_CLOUD_PROJECT")
+
 // Init initializes Cloud Trace.
 // Can be called multiple times.
-// Logs the error when called asynchronously.
+// Logs the error if called asynchronously.
 func Init() (err error) {
-	_, _, _, caller := runtime.Caller(2)
+	callers := runtime.Callers(3, make([]uintptr, 1))
 
 	once.Do(func() {
 		exporter, ierr := stackdriver.NewExporter(stackdriver.Options{
-			ProjectID: glog.ProjectID,
+			ProjectID: ProjectID,
 		})
 		if ierr == nil {
 			trace.RegisterExporter(exporter)
-		} else if !caller {
-			glog.Critical(ierr)
+			return
+		}
+		if callers == 0 {
+			json.NewEncoder(os.Stderr).Encode(map[string]string{
+				"message":  ierr.Error(),
+				"severity": "CRITICAL",
+			})
 		}
 		err = ierr
 	})

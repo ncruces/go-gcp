@@ -19,7 +19,16 @@ func ExampleInfof() {
 }
 
 func ExampleWarningj() {
-	glog.Warningj("Warning", map[string]string{"component": "app"})
+	glog.Warningj("Warning", map[string]string{
+		"component": "app",
+	})
+	// Output:
+	// {"component":"app","message":"Warning","severity":"WARNING"}
+}
+
+func ExampleWarningw() {
+	glog.Warningw("Warning",
+		"component", "app")
 	// Output:
 	// {"component":"app","message":"Warning","severity":"WARNING"}
 }

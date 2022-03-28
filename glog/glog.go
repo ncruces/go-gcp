@@ -295,22 +295,11 @@ func Emergencyw(msg string, kvs ...interface{}) {
 
 // A Logger that logs entries with additional context.
 type Logger struct {
+	callers     int
 	trace       string
 	spanID      string
 	executionID string
 	request     *httpRequest
-	callers     int
-}
-
-// ForContext creates a Logger with metadata from a context.Context.
-func ForContext(ctx context.Context) (l Logger) {
-	if span := trace.FromContext(ctx); span != nil {
-		l.trace, l.spanID = fromSpanContext(span.SpanContext())
-	}
-	if meta, _ := metadata.FromContext(ctx); meta != nil {
-		l.executionID = meta.EventID
-	}
-	return l
 }
 
 // ForRequest creates a Logger with metadata from an http.Request.
@@ -326,6 +315,22 @@ func ForRequest(r *http.Request) (l Logger) {
 		Protocol:      r.Proto,
 	}
 	return l
+}
+
+// ForContext creates a Logger with metadata from a context.Context.
+func ForContext(ctx context.Context) (l Logger) {
+	l.SetContext(ctx)
+	return l
+}
+
+// SetContext updates a Logger with metadata from a context.Context.
+func (l *Logger) SetContext(ctx context.Context) {
+	if span := trace.FromContext(ctx); span != nil {
+		l.trace, l.spanID = fromSpanContext(span.SpanContext())
+	}
+	if meta, _ := metadata.FromContext(ctx); meta != nil {
+		l.executionID = meta.EventID
+	}
 }
 
 // Print logs an entry with no assigned severity level.

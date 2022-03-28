@@ -7,8 +7,10 @@ import (
 	"reflect"
 )
 
+type any = interface{}
+
 // LockJSON calls LockData with the JSON encoding of v.
-func (m *Mutex) LockJSON(ctx context.Context, v interface{}) error {
+func (m *Mutex) LockJSON(ctx context.Context, v any) error {
 	b, err := json.Marshal(v)
 	if err != nil {
 		return err
@@ -19,7 +21,7 @@ func (m *Mutex) LockJSON(ctx context.Context, v interface{}) error {
 // TryLockJSON calls TryLockData with the JSON encoding of v.
 // Parses JSON-encoded data into the value pointed to by v,
 // if the lock is already in use and v is a pointer.
-func (m *Mutex) TryLockJSON(ctx context.Context, v interface{}) (bool, error) {
+func (m *Mutex) TryLockJSON(ctx context.Context, v any) (bool, error) {
 	b, err := json.Marshal(v)
 	if err != nil {
 		return false, err
@@ -38,7 +40,7 @@ func (m *Mutex) TryLockJSON(ctx context.Context, v interface{}) (bool, error) {
 }
 
 // UpdateJSON calls UpdateData with the JSON encoding of v.
-func (m *Mutex) UpdateJSON(ctx context.Context, v interface{}) error {
+func (m *Mutex) UpdateJSON(ctx context.Context, v any) error {
 	b, err := json.Marshal(v)
 	if err != nil {
 		return err
@@ -47,7 +49,7 @@ func (m *Mutex) UpdateJSON(ctx context.Context, v interface{}) error {
 }
 
 // AdoptJSON calls AdoptData with the JSON encoding of v.
-func (m *Mutex) AdoptJSON(ctx context.Context, id string, v interface{}) error {
+func (m *Mutex) AdoptJSON(ctx context.Context, id string, v any) error {
 	b, err := json.Marshal(v)
 	if err != nil {
 		return err
@@ -57,7 +59,7 @@ func (m *Mutex) AdoptJSON(ctx context.Context, id string, v interface{}) error {
 
 // InspectJSON calls InspectData.
 // Parses JSON-encoded data into the value pointed to by v.
-func (m *Mutex) InspectJSON(ctx context.Context, v interface{}) (bool, error) {
+func (m *Mutex) InspectJSON(ctx context.Context, v any) (bool, error) {
 	var buf bytes.Buffer
 	locked, err := m.InspectData(ctx, &buf)
 	if err == nil {

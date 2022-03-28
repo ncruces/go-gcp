@@ -9,6 +9,8 @@ import (
 	"go.opencensus.io/trace"
 )
 
+type any = interface{}
+
 func location(skip int) *sourceLocation {
 	if !LogSourceLocation {
 		return nil

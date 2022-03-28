@@ -1,5 +1,10 @@
 // Package glog implements leveled, structured logging for Google App Engine,
-// Cloud Run, and Cloud Functions.
+// Kubernetes Engine, Cloud Run, and Cloud Functions.
+//
+// Structured logs are written to stdout or stderr as JSON objects
+// serialized on a single line.
+// The Logging agent then sends the structured logs to Cloud Logging
+// as the jsonPayload of the LogEntry structure.
 package glog
 
 import (

@@ -1,5 +1,5 @@
-// Package glog implements structured logging for Google App Engine, Cloud Run
-// and Cloud Functions.
+// Package glog implements leveled, structured logging for Google App Engine,
+// Cloud Run, and Cloud Functions.
 package glog
 
 import (
@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 
 	"cloud.google.com/go/functions/metadata"
 	"go.opencensus.io/trace"
@@ -330,13 +331,13 @@ func ForRequest(r *http.Request) (l Logger) {
 // Print logs an entry with no assigned severity level.
 // Arguments are handled in the manner of fmt.Print.
 func (l Logger) Print(v ...interface{}) {
-	log(defaultsv, l, v...)
+	logm(defaultsv, l, v...)
 }
 
 // Println logs an entry with no assigned severity level.
 // Arguments are handled in the manner of fmt.Println.
 func (l Logger) Println(v ...interface{}) {
-	logln(defaultsv, l, v...)
+	logn(defaultsv, l, v...)
 }
 
 // Printf logs an entry with no assigned severity level.
@@ -360,13 +361,13 @@ func (l Logger) Printw(msg string, kvs ...interface{}) {
 // Debug logs debug or trace information.
 // Arguments are handled in the manner of fmt.Print.
 func (l Logger) Debug(v ...interface{}) {
-	log(debugsv, l, v...)
+	logm(debugsv, l, v...)
 }
 
 // Debugln logs debug or trace information.
 // Arguments are handled in the manner of fmt.Println.
 func (l Logger) Debugln(v ...interface{}) {
-	logln(debugsv, l, v...)
+	logn(debugsv, l, v...)
 }
 
 // Debugf logs debug or trace information.
@@ -390,13 +391,13 @@ func (l Logger) Debugw(msg string, kvs ...interface{}) {
 // Info logs routine information, such as ongoing status or performance.
 // Arguments are handled in the manner of fmt.Print.
 func (l Logger) Info(v ...interface{}) {
-	log(infosv, l, v...)
+	logm(infosv, l, v...)
 }
 
 // Infoln logs routine information, such as ongoing status or performance.
 // Arguments are handled in the manner of fmt.Println.
 func (l Logger) Infoln(v ...interface{}) {
-	logln(infosv, l, v...)
+	logn(infosv, l, v...)
 }
 
 // Infof logs routine information, such as ongoing status or performance.
@@ -420,13 +421,13 @@ func (l Logger) Infow(msg string, kvs ...interface{}) {
 // Notice logs normal but significant events, such as start up, shut down, or configuration.
 // Arguments are handled in the manner of fmt.Print.
 func (l Logger) Notice(v ...interface{}) {
-	log(noticesv, l, v...)
+	logm(noticesv, l, v...)
 }
 
 // Noticeln logs normal but significant events, such as start up, shut down, or configuration.
 // Arguments are handled in the manner of fmt.Println.
 func (l Logger) Noticeln(v ...interface{}) {
-	logln(noticesv, l, v...)
+	logn(noticesv, l, v...)
 }
 
 // Noticef logs normal but significant events, such as start up, shut down, or configuration.
@@ -450,13 +451,13 @@ func (l Logger) Noticew(msg string, kvs ...interface{}) {
 // Warning logs events that might cause problems.
 // Arguments are handled in the manner of fmt.Print.
 func (l Logger) Warning(v ...interface{}) {
-	log(warningsv, l, v...)
+	logm(warningsv, l, v...)
 }
 
 // Warningln logs events that might cause problems.
 // Arguments are handled in the manner of fmt.Println.
 func (l Logger) Warningln(v ...interface{}) {
-	logln(warningsv, l, v...)
+	logn(warningsv, l, v...)
 }
 
 // Warningf logs events that might cause problems.
@@ -480,13 +481,13 @@ func (l Logger) Warningw(msg string, kvs ...interface{}) {
 // Error logs events likely to cause problems.
 // Arguments are handled in the manner of fmt.Print.
 func (l Logger) Error(v ...interface{}) {
-	log(errorsv, l, v...)
+	logm(errorsv, l, v...)
 }
 
 // Errorln logs events likely to cause problems.
 // Arguments are handled in the manner of fmt.Println.
 func (l Logger) Errorln(v ...interface{}) {
-	logln(errorsv, l, v...)
+	logn(errorsv, l, v...)
 }
 
 // Errorf logs events likely to cause problems.
@@ -510,13 +511,13 @@ func (l Logger) Errorw(msg string, kvs ...interface{}) {
 // Critical logs events that cause more severe problems or outages.
 // Arguments are handled in the manner of fmt.Print.
 func (l Logger) Critical(v ...interface{}) {
-	log(criticalsv, l, v...)
+	logm(criticalsv, l, v...)
 }
 
 // Criticalln logs events that cause more severe problems or outages.
 // Arguments are handled in the manner of fmt.Println.
 func (l Logger) Criticalln(v ...interface{}) {
-	logln(criticalsv, l, v...)
+	logn(criticalsv, l, v...)
 }
 
 // Criticalf logs events that cause more severe problems or outages.
@@ -540,13 +541,13 @@ func (l Logger) Criticalw(msg string, kvs ...interface{}) {
 // Alert logs when a person must take an action immediately.
 // Arguments are handled in the manner of fmt.Print.
 func (l Logger) Alert(v ...interface{}) {
-	log(alertsv, l, v...)
+	logm(alertsv, l, v...)
 }
 
 // Alertln logs when a person must take an action immediately.
 // Arguments are handled in the manner of fmt.Println.
 func (l Logger) Alertln(v ...interface{}) {
-	logln(alertsv, l, v...)
+	logn(alertsv, l, v...)
 }
 
 // Alertf logs when a person must take an action immediately.
@@ -570,13 +571,13 @@ func (l Logger) Alertw(msg string, kvs ...interface{}) {
 // Emergency logs when one or more systems are unusable.
 // Arguments are handled in the manner of fmt.Print.
 func (l Logger) Emergency(v ...interface{}) {
-	log(emergencysv, l, v...)
+	logm(emergencysv, l, v...)
 }
 
 // Emergencyln logs when one or more systems are unusable.
 // Arguments are handled in the manner of fmt.Println.
 func (l Logger) Emergencyln(v ...interface{}) {
-	logln(emergencysv, l, v...)
+	logn(emergencysv, l, v...)
 }
 
 // Emergencyf logs when one or more systems are unusable.
@@ -642,11 +643,11 @@ func (s severity) File() *os.File {
 	}
 }
 
-func log(s severity, l Logger, v ...interface{}) {
+func logm(s severity, l Logger, v ...interface{}) {
 	logs(s, l, fmt.Sprint(v...))
 }
 
-func logln(s severity, l Logger, v ...interface{}) {
+func logn(s severity, l Logger, v ...interface{}) {
 	logs(s, l, fmt.Sprintln(v...))
 }
 
@@ -656,7 +657,7 @@ func logf(s severity, l Logger, format string, v ...interface{}) {
 
 func logs(s severity, l Logger, msg string) {
 	entry := entry{
-		Message:        msg,
+		Message:        strings.TrimSuffix(msg, "\n"),
 		Severity:       s.String(),
 		Trace:          l.trace,
 		SpanID:         l.spanID,

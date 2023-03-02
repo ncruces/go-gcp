@@ -16,7 +16,9 @@ var object = os.Getenv("OBJECT")
 
 func TestMain(m *testing.M) {
 	gmutex.HTTPClient = http.DefaultClient
-	os.Exit(m.Run())
+	if bucket != "" && object != "" {
+		os.Exit(m.Run())
+	}
 }
 
 func TestMutex_contention(t *testing.T) {

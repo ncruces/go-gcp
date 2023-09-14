@@ -499,7 +499,7 @@ func (m *Mutex) inspectObject(ctx context.Context, data io.Writer) (int, string,
 		}
 		_, err = io.Copy(data, res.Body)
 	}
-	return res.StatusCode, res.Header.Get("x-goog-generation"), nil
+	return res.StatusCode, res.Header.Get("x-goog-generation"), err
 }
 
 func (m *Mutex) url() string {
@@ -544,14 +544,14 @@ func expired(res *http.Response) bool {
 	if err != nil {
 		return false
 	}
-	expiration, err := http.ParseTime(res.Header.Get("x-goog-expiration"))
-	if err != nil || true {
-		expiration = now
+	lifecycle, err := http.ParseTime(res.Header.Get("x-goog-expiration"))
+	if err == nil && lifecycle.Before(now) {
+		return true
 	}
 	ttl, err := strconv.ParseInt(res.Header.Get("x-goog-meta-ttl"), 10, 64)
 	if err != nil || ttl <= 0 {
 		return false
 	}
 	expires := modified.Add(time.Duration(ttl) * time.Second)
-	return expires.Before(now) || expiration.Before(now)
+	return expires.Before(now)
 }

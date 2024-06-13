@@ -2,6 +2,7 @@ package gmutex_test
 
 import (
 	"context"
+	"crypto/tls"
 	"net/http"
 	"os"
 	"sync"
@@ -16,6 +17,9 @@ var object = os.Getenv("OBJECT")
 
 func TestMain(m *testing.M) {
 	gmutex.HTTPClient = http.DefaultClient
+	if os.Getenv("STORAGE_HOST_EMULATOR") != "" {
+		http.DefaultTransport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+	}
 	if bucket != "" && object != "" {
 		os.Exit(m.Run())
 	}

@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -36,23 +37,42 @@ import (
 // (it is allowed for one goroutine to lock a Mutex
 // and then arrange for another goroutine to unlock it),
 // but it is not safe for concurrent use by multiple goroutines.
+//
+// To use an API-compatible alternative to Google Cloud Storage (such as
+// fake-gcs-server or similar), provide the endpoint by setting the
+// environment variable STORAGE_EMULATOR_HOST prior to creating the
+// Mutex.
 type Mutex struct {
 	_          noCopy
 	bucket     string
 	object     string
 	generation string
 	ttl        int64
+	baseUrl    *url.URL
 }
 
 // New creates a new Mutex at the given bucket and object,
-// with the given time-to-live.
+// with the given time-to-live. To use a fake Google Cloud Storage
+// during tests, provide the API-compatible endpoint hostname
+// in the environment variable STORAGE_EMULATOR_HOST prior to calling
+// this function.
 func New(ctx context.Context, bucket, object string, ttl time.Duration) (*Mutex, error) {
 	if err := initClient(ctx); err != nil {
 		return nil, err
 	}
+	storageHost := os.Getenv("STORAGE_EMULATOR_HOST")
+	if storageHost == "" {
+		storageHost = "https://storage.googleapis.com/"
+	}
+	baseUrl, err := url.Parse(storageHost)
+	if err != nil {
+		return nil, err
+	}
+
 	m := Mutex{
-		bucket: bucket,
-		object: object,
+		bucket:  bucket,
+		object:  object,
+		baseUrl: baseUrl,
 	}
 	m.SetTTL(ttl)
 	return &m, nil
@@ -504,8 +524,8 @@ func (m *Mutex) inspectObject(ctx context.Context, data io.Writer) (int, string,
 
 func (m *Mutex) url() string {
 	url := url.URL{
-		Scheme: "https",
-		Host:   "storage.googleapis.com",
+		Scheme: m.baseUrl.Scheme,
+		Host:   m.baseUrl.Host,
 		Path:   m.bucket + "/" + m.object,
 	}
 	return url.String()

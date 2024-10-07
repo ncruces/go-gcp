@@ -100,6 +100,45 @@ func TestMutex_expiration(t *testing.T) {
 	t.Log("unlocked")
 }
 
+func TestMutex_extension(t *testing.T) {
+	ctx := context.Background()
+	mtx, err := gmutex.New(ctx, bucket, object, 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Log("locking")
+	if err := mtx.Lock(ctx); err != nil {
+		t.Fatal(err)
+	}
+	t.Log("locked")
+
+	for i := 0; i < 5; i++ {
+		time.Sleep(time.Second)
+
+		t.Log("extending")
+		if err := mtx.Extend(ctx); err != nil {
+			t.Fatal(err)
+		}
+		t.Log("extended")
+	}
+
+	mtx.Abandon()
+	t.Log("abandoned")
+
+	t.Log("locking")
+	if err := mtx.Lock(ctx); err != nil {
+		t.Fatal(err)
+	}
+	t.Log("locked")
+
+	t.Log("unlocking")
+	if err := mtx.Unlock(ctx); err != nil {
+		t.Fatal(err)
+	}
+	t.Log("unlocked")
+}
+
 func TestMutex_SetTTL(t *testing.T) {
 	tests := []struct {
 		name string

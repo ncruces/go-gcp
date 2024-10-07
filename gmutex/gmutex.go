@@ -38,10 +38,10 @@ import (
 // and then arrange for another goroutine to unlock it),
 // but it is not safe for concurrent use by multiple goroutines.
 //
-// To use an API-compatible alternative to Google Cloud Storage (such as
-// fake-gcs-server or similar), provide the endpoint by setting the
-// environment variable STORAGE_EMULATOR_HOST prior to creating the
-// Mutex.
+// To use an API-compatible alternative to Google Cloud Storage
+// (such as fake-gcs-server or similar), provide the endpoint
+// by setting the environment variable STORAGE_EMULATOR_HOST
+// prior to creating the Mutex.
 type Mutex struct {
 	_          noCopy
 	bucket     string
@@ -52,10 +52,7 @@ type Mutex struct {
 }
 
 // New creates a new Mutex at the given bucket and object,
-// with the given time-to-live. To use a fake Google Cloud Storage
-// during tests, provide the API-compatible endpoint hostname
-// in the environment variable STORAGE_EMULATOR_HOST prior to calling
-// this function.
+// with the given time-to-live.
 func New(ctx context.Context, bucket, object string, ttl time.Duration) (*Mutex, error) {
 	if err := initClient(ctx); err != nil {
 		return nil, err
@@ -449,6 +446,8 @@ func (m *Mutex) createObject(ctx context.Context, generation string, data io.Rea
 }
 
 func (m *Mutex) extendObject(ctx context.Context, generation string) (int, string, error) {
+	// Copy object doesn't update the generation, only the metageneration.
+	// Compose allows us to update the generation in a single request.
 	var buf bytes.Buffer
 	buf.WriteString("<ComposeRequest><Component><Name>")
 	xml.EscapeText(&buf, []byte(m.object))

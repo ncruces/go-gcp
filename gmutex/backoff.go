@@ -46,11 +46,11 @@ func (b *expBackOff) wait(ctx context.Context) error {
 
 func wait(ctx context.Context, delay time.Duration) error {
 	timer := time.NewTimer(delay)
-	defer timer.Stop()
 	select {
 	case <-timer.C:
 		return nil
 	case <-ctx.Done():
+		timer.Stop()
 		return ctx.Err()
 	}
 }

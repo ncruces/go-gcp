@@ -57,13 +57,18 @@ func New(ctx context.Context, bucket, object string, ttl time.Duration) (*Mutex,
 	if err := initClient(ctx); err != nil {
 		return nil, err
 	}
-	storageHost := os.Getenv("STORAGE_EMULATOR_HOST")
-	if storageHost == "" {
-		storageHost = "https://storage.googleapis.com/"
-	}
-	baseUrl, err := url.Parse(storageHost)
-	if err != nil {
-		return nil, err
+
+	var baseUrl *url.URL
+	if host := os.Getenv("STORAGE_EMULATOR_HOST"); host == "" {
+		baseUrl = &url.URL{Scheme: "https", Host: "storage.googleapis.com"}
+	} else if strings.Contains(host, "://") {
+		h, err := url.Parse(host)
+		if err != nil {
+			return nil, err
+		}
+		baseUrl = h
+	} else {
+		baseUrl = &url.URL{Scheme: "http", Host: host}
 	}
 
 	m := Mutex{

@@ -17,7 +17,7 @@ var object = os.Getenv("OBJECT")
 
 func TestMain(m *testing.M) {
 	gmutex.HTTPClient = http.DefaultClient
-	if os.Getenv("STORAGE_HOST_EMULATOR") != "" {
+	if os.Getenv("STORAGE_EMULATOR_HOST") != "" {
 		http.DefaultTransport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 	}
 	if bucket != "" && object != "" {
